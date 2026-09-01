@@ -114,7 +114,11 @@ impl Editor {
             }
             self.take_focus_for_file_explorer();
             self.set_status_message(t!("explorer.opened").to_string());
-            self.active_window_mut().sync_file_explorer_to_active_file();
+            // See `install_initialized_file_explorer`: in LIST mode the cursor
+            // belongs on the directory being browsed, not on the active buffer.
+            if !self.active_window().explorer_list_mode {
+                self.active_window_mut().sync_file_explorer_to_active_file();
+            }
         } else {
             self.active_window_mut().key_context = KeyContext::Normal;
             self.set_status_message(t!("explorer.closed").to_string());
@@ -142,9 +146,50 @@ impl Editor {
 
             self.take_focus_for_file_explorer();
             self.set_status_message(t!("explorer.focused").to_string());
-            self.active_window_mut().sync_file_explorer_to_active_file();
+            if !self.active_window().explorer_list_mode {
+                self.active_window_mut().sync_file_explorer_to_active_file();
+            }
         } else {
             self.toggle_file_explorer();
+        }
+    }
+
+    /// Enter LIST.COM browse mode on the active window: a flat, cd-style file
+    /// browser holding the keyboard, rather than an editor with a tree beside
+    /// it.
+    ///
+    /// Safe to call before the tree exists. A build already in flight picks the
+    /// mode up when it lands (`install_initialized_file_explorer` reads the
+    /// window flag), and a tree already on screen is reshaped in place here —
+    /// so neither ordering paints a frame of the wrong shape.
+    pub fn enable_explorer_list_mode(&mut self) {
+        self.active_window_mut().explorer_list_mode = true;
+        if let Some(view) = self.file_explorer_mut() {
+            view.install_parent_link();
+        }
+        self.show_file_explorer();
+        self.take_focus_for_file_explorer();
+    }
+
+    /// Leave LIST.COM browse mode, returning the explorer to the ordinary
+    /// unfolding tree rooted at the window root.
+    pub fn disable_explorer_list_mode(&mut self) {
+        let window = self.active_window_mut();
+        window.explorer_list_mode = false;
+        // Browsing may have walked the explorer somewhere else entirely; the
+        // tree mode is defined to show the *project*, so drop the browse dir
+        // and rebuild at the window root.
+        if window.explorer_browse_dir.take().is_some() {
+            window.init_file_explorer();
+        }
+    }
+
+    /// Toggle LIST.COM browse mode.
+    pub fn toggle_explorer_list_mode(&mut self) {
+        if self.active_window().explorer_list_mode {
+            self.disable_explorer_list_mode();
+        } else {
+            self.enable_explorer_list_mode();
         }
     }
 
@@ -198,6 +243,19 @@ impl Editor {
     /// full error flow. Keeps focus on the file explorer so further
     /// keyboard navigation continues to update the preview.
     fn file_explorer_preview_selected(&mut self) {
+        // In LIST mode, moving the cursor is *only* moving the cursor. Opening
+        // is an explicit act: Enter, or a double-click.
+        //
+        // This is not merely a preference. Previewing on every keypress makes
+        // the cost of an arrow press the cost of loading whatever it landed on,
+        // so cursoring past a large file stalls the browser — you cannot even
+        // scroll *past* something you never asked to open. LIST browsed
+        // directories on machines where that mattered, and it did not read a
+        // file until you picked it.
+        if self.active_window().explorer_list_mode {
+            return;
+        }
+
         // Avoid turning every arrow press into a permanent tab when the
         // user has opted out of preview tabs.
         if !self.config.file_explorer.preview_tabs {
@@ -365,6 +423,18 @@ impl Editor {
         }
     }
 
+    /// Re-root the LIST-mode browser at `dir` — the cd behind Enter-on-a-
+    /// directory and Enter-on-`..`.
+    ///
+    /// Only the explorer moves. The window's `root` is deliberately left alone,
+    /// so browsing out of the project does not re-key its workspace file or
+    /// re-root its language servers.
+    pub fn file_explorer_chdir(&mut self, dir: PathBuf) {
+        let window = self.active_window_mut();
+        window.explorer_browse_dir = Some(dir.clone());
+        window.build_file_explorer_at(dir);
+    }
+
     pub fn file_explorer_open_file(&mut self) -> AnyhowResult<()> {
         let entry_type = self
             .file_explorer()
@@ -374,9 +444,30 @@ impl Editor {
 
         if let Some((is_dir, path, name)) = entry_type {
             if is_dir {
-                self.file_explorer_toggle_expand();
+                // Enter *enters*: the tree re-roots at this directory, so the
+                // view becomes `..` plus that directory's own contents.
+                //
+                // Deliberately a different gesture from Right/Left, which still
+                // expand and collapse in place — so the tree's compact-chain
+                // folding is still there when you want to look into a directory
+                // without leaving where you are.
+                //
+                // `..` needs no special case: its entry path is already the
+                // parent, so entering it walks up.
+                self.file_explorer_chdir(path);
             } else {
                 tracing::info!("[SYNTAX DEBUG] file_explorer opening file: {:?}", path);
+                if self.active_window().explorer_list_mode {
+                    // LIST.COM opens files to *look* at. Errors stay in the
+                    // status bar: the browser is still on screen and the user
+                    // can just pick something else.
+                    if let Err(e) = self.open_file_in_viewer(&path) {
+                        self.set_status_message(
+                            t!("file.error_opening", error = e.to_string()).to_string(),
+                        );
+                    }
+                    return Ok(());
+                }
                 match self.open_file(&path) {
                     Ok(id) => {
                         // Double-click / Enter is the "I mean it" gesture — always
@@ -1648,6 +1739,25 @@ impl crate::app::window::Window {
     /// `self.resources`. For remote mode, fall back to the remote home
     /// dir only when `root` doesn't exist on the remote filesystem.
     pub(crate) fn init_file_explorer(&mut self) {
+        // In LIST mode the explorer may have been navigated away from the
+        // window root; rebuilds (toggle off/on, config reload) must come back
+        // to where the user actually is, not jump home.
+        let target = self
+            .explorer_browse_dir
+            .clone()
+            .unwrap_or_else(|| self.root.clone());
+        self.build_file_explorer_at(target);
+    }
+
+    /// Build this window's file explorer rooted at `requested_root`.
+    ///
+    /// Split out of [`Window::init_file_explorer`] so LIST mode can re-root the
+    /// tree on a cd. `FileTree` owns its root path immutably, so "descend into
+    /// a directory" is necessarily "build a new tree" — this is that build, and
+    /// it deliberately reuses the same spawn/bridge/install path as the initial
+    /// one so a cd inherits the column reservation, the ignore-pattern and
+    /// gitignore setup, and the per-window result routing for free.
+    pub(crate) fn build_file_explorer_at(&mut self, requested_root: PathBuf) {
         let is_remote = self
             .authority()
             .filesystem
@@ -1656,7 +1766,7 @@ impl crate::app::window::Window {
         let root_exists = self
             .authority()
             .filesystem
-            .is_dir(&self.root)
+            .is_dir(&requested_root)
             .unwrap_or(false);
         let root_path = if is_remote && !root_exists {
             match self.authority().filesystem.home_dir() {
@@ -1668,7 +1778,7 @@ impl crate::app::window::Window {
                 }
             }
         } else {
-            self.root.clone()
+            requested_root
         };
 
         let Some(runtime) = self.resources.tokio_runtime.clone() else {
@@ -1760,6 +1870,13 @@ impl crate::app::window::Window {
             }
         }
         view.set_compact_directories(defaults.compact_directories);
+        // Give a browse-mode tree its `..` row *before* it goes on screen, so a
+        // re-root never paints one frame without it. Doing it here — off the
+        // window's own flag — is why re-rooting needs no extra `AsyncMessage`
+        // variant to carry the mode across the bridge.
+        if self.explorer_list_mode {
+            view.install_parent_link();
+        }
         self.file_explorer = Some(view);
         // The initial build is done; release the column reservation set in
         // `init_file_explorer`. Clear it *before* the expand-to-path sync below
@@ -1775,7 +1892,14 @@ impl crate::app::window::Window {
         // when the replay above already claimed the tree — this reveal is
         // ungated, so running it on top would drag the selection off the file
         // the deferred request was sent to.
-        if !self.file_explorer_sync_in_progress && self.file_explorer_visible {
+        // Skipped entirely in LIST mode: revealing the active buffer would drag
+        // the cursor out of the directory the user just entered and, worse,
+        // expand a path *through* the flat listing. In a browser the cursor
+        // belongs on the listing, not on whatever happens to be open behind it.
+        if !self.explorer_list_mode
+            && !self.file_explorer_sync_in_progress
+            && self.file_explorer_visible
+        {
             self.sync_file_explorer_to_active_file();
         }
     }

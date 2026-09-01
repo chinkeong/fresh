@@ -32,6 +32,7 @@ mod file_open_input;
 mod file_open_orchestrators;
 mod file_open_queue;
 mod file_operations;
+pub mod file_viewer;
 mod git_index;
 mod help;
 mod help_actions;

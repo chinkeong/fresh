@@ -1658,6 +1658,7 @@
   "view.occurrence_highlight_buffer_state": "Подчертаване на наличие %{state} (този буфер)",
   "view.occurrence_highlight_state": "Открояването на съвпаденията е %{state}",
   "view.page_view": "Изглед на страница",
+  "viewer.opened": "Преглед на %{name}",
   "view.plugin_error": "Грешка в приставката: %{error}",
   "view.read_only_state": "Режимът \"само за четене\" е %{state}",
   "view.state_disabled": "изключен",

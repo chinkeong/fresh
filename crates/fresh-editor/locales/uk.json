@@ -1541,6 +1541,7 @@
   "view.fold_indicators_state": "Індикатори згортання %{state} (цей буфер)",
   "view.mode": "Режим: %{mode}",
   "view.page_view": "Page View",
+  "viewer.opened": "Перегляд %{name}",
   "view.plugin_error": "Помилка плагіна: %{error}",
   "view.read_only_state": "Read-only mode %{state}",
   "view.state_disabled": "вимкнено",

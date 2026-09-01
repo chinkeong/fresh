@@ -1541,6 +1541,7 @@
   "view.fold_indicators_state": "折叠指示符 %{state}（本缓冲区）",
   "view.mode": "模式：%{mode}",
   "view.page_view": "Page View",
+  "viewer.opened": "正在查看 %{name}",
   "view.plugin_error": "插件错误：%{error}",
   "view.read_only_state": "Read-only mode %{state}",
   "view.state_disabled": "已禁用",

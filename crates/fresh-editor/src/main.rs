@@ -1006,6 +1006,23 @@ fn handle_first_run_setup(
     // which respect a deliberately-closed explorer rather than re-opening
     // it unconditionally on every relaunch.
 
+    // `fresh` with no arguments is a request to *browse*, not to edit: there is
+    // no file to put a cursor in. It opens the LIST.COM-style flat file browser
+    // with the keyboard, so arrows and Enter walk the filesystem immediately.
+    //
+    // This is deliberately an explicit, narrowly-gated call rather than a
+    // widening of `apply_fresh_session_explorer_default`: that helper must keep
+    // honouring a deliberately-closed explorer on every *other* launch shape
+    // (the regression fixed in 3e58961c0). Here the user named nothing else to
+    // do, so the browser is the whole point of the launch and overriding a
+    // persisted "closed" is correct.
+    //
+    // `fresh <dir>` is left alone — it opens a project, and gets the ordinary
+    // tree beside the editor.
+    if file_locations.is_empty() {
+        editor.enable_explorer_list_mode();
+    }
+
     if editor.has_recovery_files().unwrap_or(false) {
         tracing::info!("Recovery files found from previous session, recovering...");
         match editor.recover_all_buffers() {
@@ -1842,7 +1859,18 @@ fn initialize_app(args: &Args) -> AnyhowResult<SetupState> {
     tracing::info!("Startup authority ready");
 
     let mut working_dir = None;
-    let mut show_file_explorer = false;
+    // A launch that names no file to edit is a *directory* launch, and a
+    // directory launch shows the browser. Bare `fresh` and `fresh .` are the
+    // same launch — same cwd, same workspace file — so they must classify the
+    // same way. Before this they diverged: only the explicit single-directory
+    // form set this, leaving a bare launch to pass `opened_files = true` and
+    // suppress the fresh-session explorer default it should have had.
+    //
+    // This cannot reopen a deliberately-closed explorer: the default still
+    // early-returns on `workspace_restored` (see
+    // `Window::apply_fresh_session_explorer_default`), so a restored workspace's
+    // persisted visibility keeps winning.
+    let mut show_file_explorer = file_locations.is_empty();
 
     // Only set working_dir if exactly one parameter is passed and it's a directory
     if file_locations.len() == 1 {

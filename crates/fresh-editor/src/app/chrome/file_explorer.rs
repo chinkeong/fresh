@@ -578,12 +578,35 @@ impl Editor {
         // The file explorer has a 1-line border at top and bottom
         let relative_row = row.saturating_sub(explorer_area.y + 1); // +1 for top border
 
+        // Read before borrowing the explorer mutably below.
+        //
+        // In browse mode the mouse mirrors the keyboard: a single click on a
+        // directory expands it in place, the way Right does, and a *double*
+        // click enters it, the way Enter does (double-click routes through
+        // `file_explorer_open_file`). A single click on a file only selects —
+        // opening it here would put the cost of loading a file behind an
+        // ordinary click, which is what makes clicking near a large one stall.
+        let list_mode = self.active_window().explorer_list_mode;
+
         if let Some(explorer) = self.file_explorer_mut().as_mut() {
             if let Some((node_id, _indent)) =
                 explorer.get_display_node_at_viewport_row(relative_row as usize)
             {
                 // Select this node
                 explorer.set_selected(Some(node_id));
+                if list_mode {
+                    let clicked_dir = explorer
+                        .tree()
+                        .get_node(node_id)
+                        .is_some_and(|node| node.is_dir());
+                    // `..` is a directory but has nothing to unfold — it is a
+                    // move, and a move needs the deliberate double-click.
+                    let is_parent_link = explorer.parent_link() == Some(node_id);
+                    if clicked_dir && !is_parent_link {
+                        self.file_explorer_toggle_expand();
+                    }
+                    return Ok(());
+                }
 
                 // Check if it's a file or directory
                 let node = explorer.tree().get_node(node_id);

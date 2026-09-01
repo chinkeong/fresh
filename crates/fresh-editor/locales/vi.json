@@ -1541,6 +1541,7 @@
   "view.fold_indicators_state": "Chỉ báo gấp %{state} (bộ đệm này)",
   "view.mode": "Chế độ: %{mode}",
   "view.page_view": "Page View",
+  "viewer.opened": "Đang xem %{name}",
   "view.plugin_error": "Lỗi plugin: %{error}",
   "view.read_only_state": "Read-only mode %{state}",
   "view.state_disabled": "đã tắt",

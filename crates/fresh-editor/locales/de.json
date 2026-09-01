@@ -1541,6 +1541,7 @@
   "view.fold_indicators_state": "Faltungsanzeigen %{state} (dieser Puffer)",
   "view.mode": "Modus: %{mode}",
   "view.page_view": "Page View",
+  "viewer.opened": "Anzeige von %{name}",
   "view.plugin_error": "Plugin-Fehler: %{error}",
   "view.read_only_state": "Read-only mode %{state}",
   "view.state_disabled": "deaktiviert",

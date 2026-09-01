@@ -1541,6 +1541,7 @@
   "view.fold_indicators_state": "Indicadores de dobra %{state} (este buffer)",
   "view.mode": "Modo: %{mode}",
   "view.page_view": "Page View",
+  "viewer.opened": "Visualizando %{name}",
   "view.plugin_error": "Erro de plugin: %{error}",
   "view.read_only_state": "Read-only mode %{state}",
   "view.state_disabled": "desativado",

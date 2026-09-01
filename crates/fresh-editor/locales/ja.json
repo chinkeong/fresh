@@ -1541,6 +1541,7 @@
   "view.fold_indicators_state": "折りたたみインジケーター: %{state}（このバッファ）",
   "view.mode": "モード: %{mode}",
   "view.page_view": "Page View",
+  "viewer.opened": "%{name} を表示中",
   "view.plugin_error": "プラグインエラー: %{error}",
   "view.read_only_state": "Read-only mode %{state}",
   "view.state_disabled": "無効",

@@ -313,6 +313,35 @@ pub struct Window {
     /// the new window's tree (or none, if it hasn't been opened yet).
     pub file_explorer: Option<FileTreeView>,
 
+    /// Buffers opened through the LIST.COM browser as read-only viewers.
+    ///
+    /// A file-backed buffer has no `BufferKind::Virtual { mode }` to carry a
+    /// mode name, and building a whole buffer-group for one viewed file would
+    /// be heavier than the feature deserves — so membership here is the third
+    /// resolution step in [`Editor::active_buffer_mode`], which is what puts
+    /// the keyboard into `KeyContext::Mode("viewer")` and makes `H` reachable
+    /// without stealing the letter from ordinary editing.
+    pub viewer_buffers: std::collections::HashSet<crate::model::event::BufferId>,
+
+    /// LIST.COM browse mode: the explorer shows one directory at a time as a
+    /// flat listing with a `..` row, and Enter on a directory *goes there*
+    /// instead of unfolding it in place.
+    ///
+    /// Window-scoped rather than global so a browser window and an editing
+    /// window can coexist, and so the flag is available at
+    /// [`Window::install_initialized_file_explorer`] — which is what lets a
+    /// re-rooted tree come back already flat, with no extra async message
+    /// variant to carry the mode across the bridge.
+    pub explorer_list_mode: bool,
+
+    /// Directory the explorer is currently browsing in LIST mode, when it has
+    /// been navigated away from [`Window::root`].
+    ///
+    /// The window root stays read-only — a cd re-roots only the *explorer*, so
+    /// the project identity, its workspace file and its LSP roots are
+    /// untouched by walking around the filesystem.
+    pub explorer_browse_dir: Option<PathBuf>,
+
     /// Polling-based mtime cache for auto-revert. Auto-revert only
     /// fires for the active window's files; inactive windows' mtimes
     /// stay frozen at dive-out time and resync on dive-back —
@@ -2250,6 +2279,9 @@ impl Window {
             root,
             authority,
             file_explorer: None,
+            viewer_buffers: std::collections::HashSet::new(),
+            explorer_list_mode: false,
+            explorer_browse_dir: None,
             file_mod_times: HashMap::new(),
             plugin_state: HashMap::new(),
             authority_spec: crate::services::authority::SessionAuthoritySpec::Local,

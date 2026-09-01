@@ -1541,6 +1541,7 @@
   "view.fold_indicators_state": "Индикаторы сворачивания %{state} (этот буфер)",
   "view.mode": "Режим: %{mode}",
   "view.page_view": "Page View",
+  "viewer.opened": "Просмотр %{name}",
   "view.plugin_error": "Ошибка плагина: %{error}",
   "view.read_only_state": "Read-only mode %{state}",
   "view.state_disabled": "отключено",

@@ -217,7 +217,9 @@ impl Editor {
     ///
     /// Resolution order:
     ///   1. The buffer's own virtual-buffer mode, if it has one.
-    ///   2. The mode declared by the buffer-group containing this
+    ///   2. The `viewer` mode, for a file opened read-only through the
+    ///      LIST.COM browser.
+    ///   3. The mode declared by the buffer-group containing this
     ///      buffer (e.g. a `git-log` group's keybindings apply to its
     ///      panels regardless of whether each panel is a virtual
     ///      buffer or a file-backed one — `openFileStreaming` produces
@@ -231,6 +233,11 @@ impl Editor {
             .and_then(|meta| meta.virtual_mode())
         {
             return Some(mode);
+        }
+        // 3. A file opened read-only through the LIST.COM browser. File-backed,
+        //    so it has no virtual mode of its own, and not worth a buffer group.
+        if win.viewer_buffers.contains(&buffer_id) {
+            return Some(crate::app::file_viewer::VIEWER_MODE);
         }
         let group_id = win.buffer_to_group.get(&buffer_id).copied()?;
         win.buffer_groups.get(&group_id).map(|g| g.mode.as_str())

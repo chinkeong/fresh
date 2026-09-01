@@ -1541,6 +1541,7 @@
   "view.fold_indicators_state": "Indicadores de plegado %{state} (este búfer)",
   "view.mode": "Modo: %{mode}",
   "view.page_view": "Page View",
+  "viewer.opened": "Viendo %{name}",
   "view.plugin_error": "Error de plugin: %{error}",
   "view.read_only_state": "Read-only mode %{state}",
   "view.state_disabled": "deshabilitado",

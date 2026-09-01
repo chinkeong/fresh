@@ -1541,6 +1541,7 @@
   "view.fold_indicators_state": "ตัวบ่งชี้การพับ %{state} (บัฟเฟอร์นี้)",
   "view.mode": "โหมด: %{mode}",
   "view.page_view": "Page View",
+  "viewer.opened": "กำลังดู %{name}",
   "view.plugin_error": "ข้อผิดพลาดปลั๊กอิน: %{error}",
   "view.read_only_state": "Read-only mode %{state}",
   "view.state_disabled": "ปิดใช้งาน",

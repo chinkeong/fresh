@@ -1541,6 +1541,7 @@
   "view.fold_indicators_state": "Indicatori di piegatura %{state} (questo buffer)",
   "view.mode": "Modalità: %{mode}",
   "view.page_view": "Page View",
+  "viewer.opened": "Visualizzazione di %{name}",
   "view.plugin_error": "Errore plugin: %{error}",
   "view.read_only_state": "Read-only mode %{state}",
   "view.state_disabled": "disabilitata",

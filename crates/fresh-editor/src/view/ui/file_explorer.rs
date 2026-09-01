@@ -534,7 +534,21 @@ impl FileExplorerRenderer {
             spans.push(Span::raw("  ".repeat(indent)));
         }
 
-        if node.is_dir() {
+        if Some(node_id) == view.parent_link() {
+            // `..` is deliberately a `Leaf` despite being a directory — nothing
+            // may expand the parent *inside* the child listing — so the
+            // state-based chain below would render it with the error glyph.
+            // Give it the plain directory marker instead.
+            let glyph_width = str_width(tree_indicator_collapsed) + 1;
+            spans.push(Span::styled(
+                format!("{} ", tree_indicator_collapsed),
+                Style::default().fg(theme.diagnostic_warning_fg),
+            ));
+            let pad = indicator_width.saturating_sub(glyph_width);
+            if pad > 0 {
+                spans.push(Span::raw(" ".repeat(pad)));
+            }
+        } else if node.is_dir() {
             let (indicator, glyph_width) = if node.is_expanded() {
                 (format!("{} ", tree_indicator_expanded), expanded_w + 1)
             } else if node.is_collapsed() {

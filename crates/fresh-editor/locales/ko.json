@@ -1541,6 +1541,7 @@
   "view.fold_indicators_state": "접기 표시기 %{state} (이 버퍼)",
   "view.mode": "모드: %{mode}",
   "view.page_view": "Page View",
+  "viewer.opened": "%{name} 보는 중",
   "view.plugin_error": "플러그인 오류: %{error}",
   "view.read_only_state": "Read-only mode %{state}",
   "view.state_disabled": "비활성화됨",

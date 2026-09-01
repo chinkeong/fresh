@@ -1591,6 +1591,7 @@
   "view.background_set": "Background set to %{path}",
   "view.compose": "Compose",
   "view.page_view": "Page View",
+  "viewer.opened": "Viewing %{name}",
   "view.cursor_style_changed": "Cursor style changed to %{style}",
   "view.keybindings_switched": "Switched to '%{map}' keybindings",
   "view.keybindings_unknown": "Unknown keybinding map: '%{map}'",

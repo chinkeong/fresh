@@ -1541,6 +1541,7 @@
   "view.fold_indicators_state": "Indikátory skládání %{state} (tento buffer)",
   "view.mode": "Režim: %{mode}",
   "view.page_view": "Page View",
+  "viewer.opened": "Zobrazuji %{name}",
   "view.plugin_error": "Chyba pluginu: %{error}",
   "view.read_only_state": "Read-only mode %{state}",
   "view.state_disabled": "zakázáno",

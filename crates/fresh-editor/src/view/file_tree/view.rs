@@ -35,6 +35,10 @@ pub struct FileTreeView {
     /// Render single-child directory chains as a single row
     /// (`foo/bar/baz`). Mirrors VSCode's `explorer.compactFolders`.
     compact_directories: bool,
+    /// The synthetic `..` row, when [`FileTree::insert_parent_link`] made one.
+    /// Held so it can be exempted from ignore filtering and recognised by the
+    /// Enter handler without matching on the display name.
+    parent_link: Option<NodeId>,
 }
 
 /// Sort mode for file tree entries
@@ -63,7 +67,23 @@ impl FileTreeView {
             viewport_height: 10, // Default, will be updated during rendering
             search: FileExplorerSearch::new(),
             compact_directories: true,
+            parent_link: None,
         }
+    }
+
+    /// Build the synthetic `..` row for the current root, if it has a parent.
+    /// Idempotent per view: the id is remembered so ignore filtering and the
+    /// Enter handler can recognise it.
+    pub fn install_parent_link(&mut self) {
+        if self.parent_link.is_some() {
+            return;
+        }
+        self.parent_link = self.tree.insert_parent_link();
+    }
+
+    /// The synthetic `..` row, if this listing has one.
+    pub fn parent_link(&self) -> Option<NodeId> {
+        self.parent_link
     }
 
     /// Toggle/set the compact-directory rendering mode.
@@ -842,6 +862,15 @@ impl FileTreeView {
 
     /// Check if a node should be visible (not filtered by ignore patterns)
     pub fn is_node_visible(&self, node_id: NodeId) -> bool {
+        // The synthetic `..` row is navigation, not content, so no filter
+        // applies to it. This is load-bearing rather than cosmetic: its path is
+        // the *parent* directory, and `is_ignored` judges a path by its own last
+        // component — so the hidden-file filter would read `..` as the parent's
+        // name and swallow the way out of any dot-directory (browse into
+        // `~/.config` with hidden files off and there would be no `..`).
+        if Some(node_id) == self.parent_link {
+            return true;
+        }
         if let Some(node) = self.tree.get_node(node_id) {
             !self
                 .ignore_patterns
@@ -1760,5 +1789,143 @@ mod tests {
         // `sibling` stays collapsed so its file child is not visible.
         assert_eq!(view.visible_count(), 4);
         assert_eq!(view.get_display_nodes().len(), 4);
+    }
+}
+
+#[cfg(test)]
+mod parent_link_tests {
+    use super::*;
+    use crate::model::filesystem::StdFileSystem;
+    use crate::services::fs::FsManager;
+    use std::fs as std_fs;
+    use std::sync::Arc;
+    use tempfile::TempDir;
+
+    /// An ordinary tree view with the `..` row installed — the browse-mode
+    /// shape: the familiar explorer, plus a way out of the project root.
+    async fn view_at(root: &std::path::Path) -> FileTreeView {
+        let manager = Arc::new(FsManager::new(Arc::new(StdFileSystem)));
+        let mut tree = FileTree::new(root.to_path_buf(), manager).await.unwrap();
+        let root_id = tree.root_id();
+        tree.expand_node(root_id).await.unwrap();
+        let mut view = FileTreeView::new(tree);
+        view.install_parent_link();
+        view
+    }
+
+    fn row_names(view: &FileTreeView) -> Vec<String> {
+        view.get_display_nodes()
+            .into_iter()
+            .map(|(id, _)| view.tree().get_node(id).unwrap().entry.name.clone())
+            .collect()
+    }
+
+    /// `..` is the first row under the project root, and the tree is otherwise
+    /// untouched — the root row and its children are still there.
+    #[tokio::test]
+    async fn parent_link_is_the_first_child_of_the_root() {
+        let temp = TempDir::new().unwrap();
+        let project = temp.path().join("project");
+        std_fs::create_dir_all(project.join("src")).unwrap();
+        std_fs::write(project.join("README.md"), "x").unwrap();
+
+        let view = view_at(&project).await;
+        let names = row_names(&view);
+
+        assert_eq!(names.first().map(String::as_str), Some("project"));
+        assert_eq!(names.get(1).map(String::as_str), Some(".."));
+        assert!(names.contains(&"src".to_string()));
+        assert!(names.contains(&"README.md".to_string()));
+    }
+
+    /// Regression: `..` points at the *parent* directory, and the hidden-file
+    /// filter judges a path by its own last component. Without an exemption,
+    /// browsing inside a dot-directory would hide the only way out.
+    #[tokio::test]
+    async fn parent_link_survives_inside_a_dot_directory() {
+        let temp = TempDir::new().unwrap();
+        let project = temp.path().join(".config").join("app");
+        std_fs::create_dir_all(&project).unwrap();
+        std_fs::write(project.join("settings.json"), "{}").unwrap();
+
+        let mut view = view_at(&project).await;
+        view.ignore_patterns_mut().set_show_hidden(false);
+
+        assert!(
+            row_names(&view).contains(&"..".to_string()),
+            "`..` must survive the hidden filter; it is navigation, not content"
+        );
+    }
+
+    /// A filesystem root has no parent, so it gets no `..` rather than one
+    /// pointing at itself.
+    #[tokio::test]
+    async fn filesystem_root_has_no_parent_link() {
+        let manager = Arc::new(FsManager::new(Arc::new(StdFileSystem)));
+        let mut tree = FileTree::new(std::path::PathBuf::from("/"), manager)
+            .await
+            .unwrap();
+        let root_id = tree.root_id();
+        tree.expand_node(root_id).await.unwrap();
+        let mut view = FileTreeView::new(tree);
+        view.install_parent_link();
+
+        assert!(view.parent_link().is_none());
+        assert!(!row_names(&view).contains(&"..".to_string()));
+    }
+
+    /// `..` must not claim the parent's path in the tree's path index: that map
+    /// is what `expand_to_path` and the poll refresh's by-path cursor recovery
+    /// read, and a child row answering for the parent directory corrupts both.
+    #[tokio::test]
+    async fn parent_link_does_not_claim_the_parent_path() {
+        let temp = TempDir::new().unwrap();
+        let project = temp.path().join("project");
+        std_fs::create_dir_all(&project).unwrap();
+        std_fs::write(project.join("a.txt"), "x").unwrap();
+
+        let view = view_at(&project).await;
+        assert!(
+            view.tree()
+                .get_node_by_path(project.parent().unwrap())
+                .is_none(),
+            "the `..` row must stay out of path_to_node"
+        );
+    }
+
+    /// Compact directory chains still fold — the behaviour that walks you to
+    /// the deepest level that actually holds files. Adding `..` must not
+    /// disturb it.
+    #[tokio::test]
+    async fn compact_chains_still_fold_with_a_parent_link_present() {
+        let temp = TempDir::new().unwrap();
+        let project = temp.path().join("project");
+        let deep = project.join("a/b/c");
+        std_fs::create_dir_all(&deep).unwrap();
+        std_fs::write(deep.join("leaf.txt"), "x").unwrap();
+
+        let manager = Arc::new(FsManager::new(Arc::new(StdFileSystem)));
+        let mut tree = FileTree::new(project.clone(), manager).await.unwrap();
+        for p in [
+            project.clone(),
+            project.join("a"),
+            project.join("a/b"),
+            deep,
+        ] {
+            if let Some(id) = tree.get_node_by_path(&p).map(|n| n.id) {
+                tree.expand_node(id).await.unwrap();
+            }
+        }
+        let mut view = FileTreeView::new(tree);
+        view.install_parent_link();
+        assert!(view.compact_directories(), "compact folding is the default");
+
+        let names = row_names(&view);
+        assert!(names.contains(&"..".to_string()));
+        // `a` and `b` are single-child links: they are absorbed into the
+        // chain anchor rather than each taking a row of their own.
+        assert!(!names.contains(&"a".to_string()), "rows: {names:?}");
+        assert!(!names.contains(&"b".to_string()), "rows: {names:?}");
+        assert!(names.contains(&"leaf.txt".to_string()), "rows: {names:?}");
     }
 }

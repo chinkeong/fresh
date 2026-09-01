@@ -1541,6 +1541,7 @@
   "view.fold_indicators_state": "Indicateurs de pliage %{state} (ce tampon)",
   "view.mode": "Mode: %{mode}",
   "view.page_view": "Page View",
+  "viewer.opened": "Affichage de %{name}",
   "view.plugin_error": "Erreur du plugin : %{error}",
   "view.read_only_state": "Read-only mode %{state}",
   "view.state_disabled": "désactivé",

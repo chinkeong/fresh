@@ -1,5 +1,5 @@
 use super::node::{NodeId, NodeState, TreeNode};
-use crate::model::filesystem::DirEntry;
+use crate::model::filesystem::{DirEntry, EntryType};
 use crate::services::fs::FsManager;
 use std::collections::HashMap;
 use std::io;
@@ -102,6 +102,39 @@ impl FileTree {
     /// Get all nodes
     pub fn all_nodes(&self) -> impl Iterator<Item = &TreeNode> {
         self.nodes.values()
+    }
+
+    /// Insert a synthetic `..` row as the root's first child, pointing at the
+    /// root's parent directory. Returns the new node's id, or `None` at a
+    /// filesystem root, which has no parent to offer.
+    ///
+    /// LIST-mode browsing shows one directory at a time, so the way up is a
+    /// *row* rather than a collapse. Making it a real `TreeNode` means every
+    /// consumer that does `get_node` / `get_depth` / hit-testing keeps working
+    /// unchanged, rather than each having to special-case a sentinel id.
+    ///
+    /// Two deliberate departures from an ordinary node:
+    ///
+    /// - It is **not** registered in `path_to_node`. Its path is the *parent*
+    ///   directory, and claiming that path would make `get_node_by_path(parent)`
+    ///   resolve to a child of the root — corrupting `expand_to_path` and the
+    ///   poll refresh's by-path cursor recovery.
+    /// - Its state is `Leaf` despite `is_dir()` being true, so Right-arrow
+    ///   cannot try to expand the parent *inside* the child listing. In LIST
+    ///   mode Enter re-roots the tree instead.
+    pub fn insert_parent_link(&mut self) -> Option<NodeId> {
+        let parent = self.root_path.parent()?.to_path_buf();
+        let id = NodeId(self.next_id);
+        self.next_id += 1;
+
+        let entry = DirEntry::new(parent, "..".to_string(), EntryType::Directory);
+        let mut node = TreeNode::new(id, entry, Some(self.root_id));
+        node.state = NodeState::Leaf;
+        self.nodes.insert(id, node);
+        if let Some(root) = self.nodes.get_mut(&self.root_id) {
+            root.children.insert(0, id);
+        }
+        Some(id)
     }
 
     /// Expand a directory node (load its children)
