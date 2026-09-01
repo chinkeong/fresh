@@ -40,6 +40,7 @@ pub mod document_model;
 pub mod emacs_actions;
 pub mod emacs_keymap;
 pub mod encoding;
+pub mod explorer_browse_mode;
 pub mod explorer_bugs;
 pub mod explorer_context_menu;
 pub mod explorer_focus_terminal_keys;
