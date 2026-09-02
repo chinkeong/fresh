@@ -83,6 +83,18 @@ impl Editor {
             window.mark_buffer_read_only(buffer_id, true);
         }
 
+        // A binary opens as a hex dump. The alternative — the text renderer's
+        // `<7F><45><4C>` escape soup — is not a useful way to look at bytes,
+        // and anyone opening a binary in a viewer wants the dump. `H` toggles
+        // back to that escape rendering for the rare time it is wanted.
+        //
+        // Text files are untouched: defaulting a `.txt` to hex would be absurd.
+        if self.active_state().buffer.is_binary()
+            && self.active_view_mode() != crate::state::ViewMode::Hex
+        {
+            self.active_window_mut().handle_toggle_hex_view();
+        }
+
         // Browsing is a sequence of glances, and without this each glance
         // leaves a tab behind — walk a directory of fifty files and you have
         // fifty tabs you never asked to keep. Retire the previous glance now

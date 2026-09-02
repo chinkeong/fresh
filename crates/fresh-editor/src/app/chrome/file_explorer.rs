@@ -599,13 +599,17 @@ impl Editor {
                         .tree()
                         .get_node(node_id)
                         .is_some_and(|node| node.is_dir());
-                    // `..` is a directory but has nothing to unfold — it is a
-                    // move, and a move needs the deliberate double-click.
-                    let is_parent_link = explorer.parent_link() == Some(node_id);
-                    if clicked_dir && !is_parent_link {
-                        self.file_explorer_toggle_expand();
+                    if clicked_dir {
+                        // `..` is a directory but has nothing to unfold — it is
+                        // a move, and a move needs the deliberate double-click.
+                        if explorer.parent_link() != Some(node_id) {
+                            self.file_explorer_toggle_expand();
+                        }
+                        return Ok(());
                     }
-                    return Ok(());
+                    // A file falls through to the ordinary preview path below,
+                    // which is guarded against the one shape that is expensive
+                    // to load (see `preview_would_fully_load`).
                 }
 
                 // Check if it's a file or directory

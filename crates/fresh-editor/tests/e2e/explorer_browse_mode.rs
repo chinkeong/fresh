@@ -170,21 +170,48 @@ fn enter_on_parent_row_walks_back_out() {
     );
 }
 
-/// Arrowing over a file must not open it.
-///
-/// The regression this pins is not cosmetic: preview-on-arrow makes the cost
-/// of one keypress the cost of loading the file under it, so scrolling past a
-/// large file stalls the browser.
+/// Arrowing over an ordinary file previews it — the editor's long-standing
+/// behaviour, restored after briefly being switched off wholesale.
 #[test]
-fn arrowing_over_files_opens_nothing() {
+fn arrowing_over_a_small_file_previews_it() {
     let mut harness = browse_harness();
-    // Walk the whole listing, files included.
-    down(&mut harness, 5);
+    down(&mut harness, 4); // root, `..`, chain, plain, then alpha.txt
+    harness
+        .wait_until(|h| h.get_tab_bar().contains("alpha.txt"))
+        .unwrap();
 
     let tabs = harness.get_tab_bar();
     assert!(
-        !tabs.contains("alpha.txt") && !tabs.contains("beta.txt"),
-        "moving the cursor must not open files, tab bar was:\n{tabs}"
+        tabs.contains("preview"),
+        "an arrowed-over file should open as a preview tab, got:\n{tabs}"
+    );
+}
+
+/// ...but NOT a large binary, which is the one shape the loader reads whole
+/// rather than paging lazily.
+///
+/// This is the regression that made browsing unusable: preview turned one
+/// keypress into a full read, so cursoring *past* a big file — never asking to
+/// open it — stalled. Measured at ~1.4s for 200 MB and linear, so a multi-GB
+/// file is both a long stall and an allocation of its own size. Large *text*
+/// files page lazily and are deliberately still previewed.
+#[test]
+fn arrowing_over_a_large_binary_previews_nothing() {
+    let mut harness = EditorTestHarness::with_temp_project(120, 30).unwrap();
+    let root = harness.project_dir().unwrap();
+    // Over the 10 MiB default threshold, and full of NULs so binary detection
+    // fires — together, the full-read branch.
+    fs::write(root.join("huge.bin"), vec![0u8; 11 * 1024 * 1024]).unwrap();
+    fs::write(root.join("small.txt"), "small").unwrap();
+
+    harness.editor_mut().enable_explorer_list_mode();
+    harness.wait_for_file_explorer_item("huge.bin").unwrap();
+    down(&mut harness, 2); // root, `..`, then huge.bin
+
+    let tabs = harness.get_tab_bar();
+    assert!(
+        !tabs.contains("huge.bin"),
+        "a large binary must not be previewed on an arrow press, tab bar was:\n{tabs}"
     );
 }
 
@@ -270,10 +297,11 @@ fn single_click_on_a_directory_expands_it() {
     );
 }
 
-/// A single click on a file selects it and nothing else. Same reasoning as the
-/// arrow-key case: opening must stay behind a deliberate gesture.
+/// A single click on a file previews it, matching the arrow-key behaviour and
+/// the editor's own long-standing convention. The expensive shape is excluded
+/// by the same guard, so the click is safe.
 #[test]
-fn single_click_on_a_file_opens_nothing() {
+fn single_click_on_a_file_previews_it() {
     let mut harness = browse_harness();
 
     let row = harness
@@ -282,12 +310,54 @@ fn single_click_on_a_file_opens_nothing() {
         .position(|l| l.contains("alpha.txt"))
         .expect("`alpha.txt` must be on screen") as u16;
     harness.mouse_click(6, row).unwrap();
+    harness
+        .wait_until(|h| h.get_tab_bar().contains("alpha.txt"))
+        .unwrap();
 
     let tabs = harness.get_tab_bar();
     assert!(
-        !tabs.contains("alpha.txt"),
-        "a single click must not open the file, tab bar was:\n{tabs}"
+        tabs.contains("preview"),
+        "a single click should preview, got:\n{tabs}"
     );
+}
+
+/// A binary opens as a hex dump rather than the text renderer's `<7F><45>`
+/// escape rendering, which is not a useful way to look at bytes.
+#[test]
+fn a_binary_opens_directly_into_hex_view() {
+    let mut harness = EditorTestHarness::with_temp_project(140, 30).unwrap();
+    let root = harness.project_dir().unwrap();
+    let mut bytes = vec![0x7F, 0x45, 0x4C, 0x46];
+    bytes.extend_from_slice(&[0x00; 12]);
+    fs::write(root.join("prog.bin"), &bytes).unwrap();
+
+    harness.editor_mut().enable_explorer_list_mode();
+    harness.wait_for_file_explorer_item("prog.bin").unwrap();
+    down(&mut harness, 2);
+    harness
+        .send_key(KeyCode::Enter, KeyModifiers::NONE)
+        .unwrap();
+    harness
+        .wait_until(|h| h.screen_to_string().contains("0000-0000"))
+        .unwrap();
+
+    let screen = harness.screen_to_string();
+    assert!(
+        screen.contains("Address") && screen.contains("DUMP"),
+        "a binary should open straight into the dump, got:\n{screen}"
+    );
+    assert!(
+        !screen.contains("<7F>"),
+        "the escape rendering should not be the default for a binary, got:\n{screen}"
+    );
+
+    // `h` falls back to that escape rendering for the times it is wanted.
+    harness
+        .send_key(KeyCode::Char('h'), KeyModifiers::NONE)
+        .unwrap();
+    harness
+        .wait_until(|h| h.screen_to_string().contains("<7F>"))
+        .unwrap();
 }
 
 /// `H` in the viewer shows the traditional three-column dump: a dashed
@@ -316,9 +386,7 @@ fn hex_view_renders_address_bytes_and_dump_columns() {
         .wait_until(|h| h.get_tab_bar().contains("sample.bin"))
         .unwrap();
 
-    harness
-        .send_key(KeyCode::Char('h'), KeyModifiers::NONE)
-        .unwrap();
+    // A binary opens in hex already — no keypress needed to get here.
     harness
         .wait_until(|h| h.screen_to_string().contains("0000-0000"))
         .unwrap();
@@ -429,9 +497,7 @@ fn hex_probe_harness() -> EditorTestHarness {
     harness
         .wait_until(|h| h.get_tab_bar().contains("probe.bin"))
         .unwrap();
-    harness
-        .send_key(KeyCode::Char('h'), KeyModifiers::NONE)
-        .unwrap();
+    // A binary opens in hex already — no keypress needed to get here.
     harness
         .wait_until(|h| h.screen_to_string().contains("0000-0000"))
         .unwrap();

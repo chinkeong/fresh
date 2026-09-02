@@ -243,19 +243,6 @@ impl Editor {
     /// full error flow. Keeps focus on the file explorer so further
     /// keyboard navigation continues to update the preview.
     fn file_explorer_preview_selected(&mut self) {
-        // In LIST mode, moving the cursor is *only* moving the cursor. Opening
-        // is an explicit act: Enter, or a double-click.
-        //
-        // This is not merely a preference. Previewing on every keypress makes
-        // the cost of an arrow press the cost of loading whatever it landed on,
-        // so cursoring past a large file stalls the browser — you cannot even
-        // scroll *past* something you never asked to open. LIST browsed
-        // directories on machines where that mattered, and it did not read a
-        // file until you picked it.
-        if self.active_window().explorer_list_mode {
-            return;
-        }
-
         // Avoid turning every arrow press into a permanent tab when the
         // user has opted out of preview tabs.
         if !self.config.file_explorer.preview_tabs {
@@ -270,6 +257,20 @@ impl Editor {
             Some(entry) if !entry.is_dir() => entry.path.clone(),
             _ => return,
         };
+
+        // Previewing is meant to be free. It is free for everything except a
+        // large *binary* file, which `load_large_file_internal` reads whole
+        // rather than lazily — measured at ~1.4s for 200 MB, so linear, and a
+        // multi-GB file is both a long stall and an allocation of its own size.
+        // Large *text* files are already lazy (~0.4s for the same 200 MB) and
+        // preview fine.
+        //
+        // So the guard is on the expensive shape specifically, not on preview
+        // in general: cheap files still preview on a click or an arrow press,
+        // and the one case that would hang asks for a deliberate open instead.
+        if self.preview_would_fully_load(&path) {
+            return;
+        }
 
         if let Err(e) = self.open_file_preview(&path) {
             tracing::debug!(
@@ -433,6 +434,35 @@ impl Editor {
         let window = self.active_window_mut();
         window.explorer_browse_dir = Some(dir.clone());
         window.build_file_explorer_at(dir);
+    }
+
+    /// Whether previewing `path` would read the whole file into memory.
+    ///
+    /// Mirrors the decision in `Buffer::load_large_file_internal`: over the
+    /// large-file threshold AND detected binary means the loader takes the
+    /// full-read branch. Everything else is either small or lazily paged.
+    ///
+    /// Deliberately cheap — a `metadata` call plus the same 8 KB header the
+    /// loader itself samples — so it costs nothing on the common path.
+    fn preview_would_fully_load(&self, path: &std::path::Path) -> bool {
+        let threshold = self.config.editor.large_file_threshold_bytes as usize;
+        let fs = &self.authority().filesystem;
+        let Some(meta) = fs.metadata_if_exists(path) else {
+            return false;
+        };
+        let size = meta.size as usize;
+        if size <= threshold {
+            return false;
+        }
+        let sample_len = size.min(8 * 1024);
+        let Ok(sample) = fs.read_range(path, 0, sample_len) else {
+            // Unreadable header: let the real open report the error rather than
+            // silently treating it as previewable.
+            return true;
+        };
+        let (_, is_binary) =
+            crate::model::buffer::format::detect_encoding_or_binary(&sample, size > sample_len);
+        is_binary
     }
 
     pub fn file_explorer_open_file(&mut self) -> AnyhowResult<()> {
