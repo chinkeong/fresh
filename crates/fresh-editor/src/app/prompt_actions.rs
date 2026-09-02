@@ -167,22 +167,48 @@ impl Editor {
             }
             PromptType::GotoByteOffset => {
                 // Parse byte offset — strip optional trailing 'B' or 'b' suffix
-                let trimmed = input.trim();
-                let num_str = trimmed
-                    .strip_suffix('B')
-                    .or_else(|| trimmed.strip_suffix('b'))
-                    .unwrap_or(trimmed);
-                match num_str.parse::<usize>() {
+                // In a hex view this prompt is an *address* prompt: the dump's
+                // own dashed form (`0000-0010`), bare hex, or `0x…` — always
+                // base 16, because in a hex view `10` is sixteen. Everywhere
+                // else (a large file with no line index) it stays a decimal
+                // byte offset with an optional `B` suffix.
+                let is_hex = self.active_view_mode() == crate::state::ViewMode::Hex;
+                let parsed: Result<usize, String> = if is_hex {
+                    crate::app::regex_replace::parse_hex_address(&input)
+                        .map_err(|_| t!("goto.invalid_address", input = &input).to_string())
+                } else {
+                    let trimmed = input.trim();
+                    let num_str = trimmed
+                        .strip_suffix('B')
+                        .or_else(|| trimmed.strip_suffix('b'))
+                        .unwrap_or(trimmed);
+                    num_str
+                        .parse::<usize>()
+                        .map_err(|_| t!("goto.invalid_byte_offset", input = &input).to_string())
+                };
+                match parsed {
                     Ok(offset) => {
                         self.goto_byte_offset(offset);
-                        self.set_status_message(
-                            t!("goto.jumped_byte", offset = offset).to_string(),
-                        );
+                        if is_hex {
+                            // The dump is addressed by byte; the render pass's
+                            // cursor-visibility pass is line-based and knows
+                            // nothing of hex, so moving the cursor alone will
+                            // not scroll the dump to the target. Park the
+                            // target's own 16-byte row a third of the way down
+                            // and lock the scroll against being undone.
+                            self.park_hex_viewport_on(offset);
+                            let address = format!("{:04X}-{:04X}", offset >> 16, offset & 0xFFFF);
+                            self.set_status_message(
+                                t!("goto.jumped_address", address = address).to_string(),
+                            );
+                        } else {
+                            self.set_status_message(
+                                t!("goto.jumped_byte", offset = offset).to_string(),
+                            );
+                        }
                     }
-                    Err(_) => {
-                        self.set_status_message(
-                            t!("goto.invalid_byte_offset", input = &input).to_string(),
-                        );
+                    Err(message) => {
+                        self.set_status_message(message);
                     }
                 }
             }

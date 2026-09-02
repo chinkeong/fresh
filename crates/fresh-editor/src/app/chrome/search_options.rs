@@ -12,7 +12,13 @@ pub(crate) struct SearchOptions;
 impl ChromeComponent for SearchOptions {
     fn collect(&self, ed: &Editor, t: &mut ChromeTreeBuilder) {
         if let Some(l) = ed.search_options_layout_now() {
-            let spans = [l.case_sensitive, l.whole_word, l.regex, l.confirm_each];
+            let spans = [
+                l.case_sensitive,
+                l.whole_word,
+                l.regex,
+                l.hex,
+                l.confirm_each,
+            ];
             let start = spans.iter().flatten().map(|(s, _)| *s).min();
             let end = spans.iter().flatten().map(|(_, e)| *e).max();
             if let (Some(start), Some(end)) = (start, end) {
@@ -37,6 +43,7 @@ impl ChromeComponent for SearchOptions {
                     SearchOptionsHover::CaseSensitive => HoverTarget::SearchOptionCaseSensitive,
                     SearchOptionsHover::WholeWord => HoverTarget::SearchOptionWholeWord,
                     SearchOptionsHover::Regex => HoverTarget::SearchOptionRegex,
+                    SearchOptionsHover::Hex => HoverTarget::SearchOptionHex,
                     SearchOptionsHover::ConfirmEach => HoverTarget::SearchOptionConfirmEach,
                     SearchOptionsHover::None => return None,
                 });
@@ -81,6 +88,7 @@ impl Editor {
                 Some(self.handle_action(Action::ToggleSearchWholeWord))
             }
             SearchOptionsHover::Regex => Some(self.handle_action(Action::ToggleSearchRegex)),
+            SearchOptionsHover::Hex => Some(self.handle_action(Action::ToggleSearchHex)),
             SearchOptionsHover::ConfirmEach => {
                 Some(self.handle_action(Action::ToggleSearchConfirmEach))
             }

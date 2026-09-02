@@ -3402,6 +3402,7 @@ pub fn action_to_events(
         | Action::ToggleSearchCaseSensitive
         | Action::ToggleSearchWholeWord
         | Action::ToggleSearchRegex
+        | Action::ToggleSearchHex
         | Action::ToggleSearchConfirmEach
         | Action::StartMacroRecording
         | Action::StopMacroRecording

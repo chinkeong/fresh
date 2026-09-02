@@ -443,3 +443,165 @@ mod tests {
         assert_eq!(matches[0].replacement, "ooblaoo");
     }
 }
+
+/// Parse a hex byte pattern typed into the search box.
+///
+/// Accepts the shapes people actually type: `00 01 02 03`, `000102 03`,
+/// `DE-AD-BE-EF`, `0xDE 0xAD`. Separators (space, tab, comma, colon, hyphen,
+/// underscore) are ignored between bytes and a `0x` prefix is allowed on each.
+///
+/// Digits must come in pairs. An odd count is a typo, not a half-byte, and
+/// silently padding or dropping a nibble would search for something other than
+/// what is on screen.
+pub fn parse_hex_pattern(query: &str) -> Result<Vec<u8>, String> {
+    let mut digits = String::new();
+    let mut chars = query.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        match c {
+            ' ' | '\t' | ',' | ':' | '-' | '_' => continue,
+            '0' if matches!(chars.peek(), Some('x') | Some('X')) => {
+                chars.next();
+            }
+            c if c.is_ascii_hexdigit() => digits.push(c),
+            c => return Err(format!("'{}' is not a hex digit", c)),
+        }
+    }
+
+    if digits.is_empty() {
+        return Err("Enter a hex byte pattern, e.g. 00 01 02 03".to_string());
+    }
+    if digits.len() % 2 != 0 {
+        return Err(format!(
+            "{} hex digits is not a whole number of bytes",
+            digits.len()
+        ));
+    }
+
+    Ok(digits
+        .as_bytes()
+        .chunks(2)
+        .map(|pair| {
+            let hi = (pair[0] as char).to_digit(16).unwrap_or(0) as u8;
+            let lo = (pair[1] as char).to_digit(16).unwrap_or(0) as u8;
+            (hi << 4) | lo
+        })
+        .collect())
+}
+
+/// Parse an address typed into the go-to prompt while in hex mode.
+///
+/// Accepts the dashed form the dump itself prints (`0000-0010`), a bare hex
+/// number (`1000`), and an explicit `0x1000`. Always hex — in a hex view an
+/// unprefixed number is an address, and reading it as decimal would send the
+/// cursor somewhere the user did not point at.
+pub fn parse_hex_address(input: &str) -> Result<usize, String> {
+    let cleaned: String = input
+        .trim()
+        .trim_start_matches("0x")
+        .trim_start_matches("0X")
+        .chars()
+        .filter(|c| !matches!(c, '-' | '_' | ' '))
+        .collect();
+
+    if cleaned.is_empty() {
+        return Err("Enter an address, e.g. 0000-0010".to_string());
+    }
+    if let Some(bad) = cleaned.chars().find(|c| !c.is_ascii_hexdigit()) {
+        return Err(format!("'{}' is not a hex digit", bad));
+    }
+    usize::from_str_radix(&cleaned, 16).map_err(|_| format!("'{}' is too large", input.trim()))
+}
+
+/// Build a byte regex matching `bytes` literally.
+///
+/// **`.unicode(false)` is load-bearing, not tidiness.** `regex::bytes` still
+/// compiles in Unicode mode by default, where `\xDE` denotes the *character*
+/// U+00DE — which encodes as the two bytes `C3 9E` and so never matches a raw
+/// `0xDE`. A Unicode-mode byte regex also refuses to match invalid-UTF-8
+/// haystack bytes at all, which is most of any binary file.
+pub fn build_byte_search_regex(bytes: &[u8]) -> Result<regex::bytes::Regex, String> {
+    let mut pattern = String::with_capacity(bytes.len() * 4);
+    for b in bytes {
+        pattern.push_str(&format!(r"\x{:02X}", b));
+    }
+    regex::bytes::RegexBuilder::new(&pattern)
+        .unicode(false)
+        .build()
+        .map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod hex_input_tests {
+    use super::*;
+
+    #[test]
+    fn hex_pattern_accepts_the_shapes_people_type() {
+        let want = vec![0x00, 0x01, 0x02, 0x03];
+        for input in [
+            "00 01 02 03",
+            "00010203",
+            "00-01-02-03",
+            "0x00 0x01 0x02 0x03",
+        ] {
+            assert_eq!(parse_hex_pattern(input).unwrap(), want, "input: {input}");
+        }
+    }
+
+    /// An odd digit count is a typo. Padding or truncating it would search for
+    /// a pattern other than the one on screen.
+    #[test]
+    fn hex_pattern_rejects_half_bytes_and_junk() {
+        assert!(parse_hex_pattern("DEA").is_err());
+        assert!(parse_hex_pattern("").is_err());
+        assert!(parse_hex_pattern("DE ZZ").is_err());
+    }
+
+    /// The regression the byte path exists to avoid: in Unicode mode `\xDE` is
+    /// U+00DE (`C3 9E`) and never matches the raw byte 0xDE.
+    #[test]
+    fn byte_regex_matches_raw_high_bytes() {
+        let re = build_byte_search_regex(&[0xDE, 0xAD]).unwrap();
+        let haystack = [0x00, 0xFF, 0xDE, 0xAD, 0x01];
+        let m = re.find(&haystack).expect("must match the raw bytes");
+        assert_eq!((m.start(), m.end()), (2, 4));
+
+        let unicode_mode = regex::bytes::RegexBuilder::new(r"\xDE\xAD")
+            .build()
+            .unwrap();
+        assert!(
+            unicode_mode.find(&haystack).is_none(),
+            "unicode-mode byte regex must NOT match — this is why .unicode(false) is required"
+        );
+    }
+
+    /// A byte pattern must be findable inside content that is not valid UTF-8,
+    /// which is the entire point of searching a binary.
+    #[test]
+    fn byte_regex_works_on_invalid_utf8() {
+        let re = build_byte_search_regex(b"LIST").unwrap();
+        let mut haystack = vec![0xC3, 0x28, 0xFF, 0xFE];
+        haystack.extend_from_slice(b"LIST.COM");
+        assert_eq!(re.find(&haystack).map(|m| m.start()), Some(4));
+    }
+
+    /// The address parser accepts the dump's own dashed form, so a user can
+    /// read an address off the screen and type it straight back in.
+    #[test]
+    fn address_accepts_the_dumps_own_format() {
+        assert_eq!(parse_hex_address("0000-0010").unwrap(), 0x10);
+        assert_eq!(parse_hex_address("0001-0000").unwrap(), 0x1_0000);
+        assert_eq!(parse_hex_address("1000").unwrap(), 0x1000);
+        assert_eq!(parse_hex_address("0x1000").unwrap(), 0x1000);
+        assert_eq!(parse_hex_address("  ff  ").unwrap(), 0xFF);
+    }
+
+    /// Always hex, never decimal: in a hex view `10` is sixteen. Reading it as
+    /// ten would move the cursor somewhere the user did not point at.
+    #[test]
+    fn address_is_always_hex() {
+        assert_eq!(parse_hex_address("10").unwrap(), 16);
+        assert!(parse_hex_address("").is_err());
+        assert!(parse_hex_address("xyz").is_err());
+    }
+}

@@ -534,6 +534,13 @@ impl Editor {
                         shortcut(&Action::ToggleSearchRegex),
                     ),
                     opt(
+                        lo.hex,
+                        "hex",
+                        t!("search.hex").to_string(),
+                        win.search_use_hex,
+                        shortcut(&Action::ToggleSearchHex),
+                    ),
+                    opt(
                         lo.confirm_each,
                         "confirm",
                         t!("search.confirm_each").to_string(),

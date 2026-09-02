@@ -1838,6 +1838,49 @@ impl Editor {
         );
     }
 
+    /// View mode of the active split, for dispatch sites that must branch on
+    /// it. Falls back to `Source` rather than panicking: a mode probe is not a
+    /// good enough reason to take the editor down.
+    ///
+    /// Reads through `windows` rather than `split_view_states()`, which is
+    /// `#[cfg(test)]`-gated and would compile under `cargo test` then fail the
+    /// real build.
+    pub fn active_view_mode(&self) -> crate::state::ViewMode {
+        let Some((mgr, vs_map)) = self
+            .windows
+            .get(&self.active_window)
+            .and_then(|w| w.buffers.splits())
+        else {
+            return crate::state::ViewMode::Source;
+        };
+        vs_map
+            .get(&mgr.active_split())
+            .map(|vs| vs.view_mode.clone())
+            .unwrap_or(crate::state::ViewMode::Source)
+    }
+
+    /// Park a hex dump's viewport on the row containing `offset`.
+    ///
+    /// Needed because the render pass's cursor-visibility pass is line-based
+    /// and knows nothing of hex. Moving the cursor alone does not scroll a dump
+    /// to its target, and the line-based scroll can land `top_byte` somewhere
+    /// the dump renders as blank — which is what a hex-mode search did before
+    /// this existed. Put the target's own 16-byte row a third of the way down
+    /// and lock the scroll against being undone on the next frame.
+    ///
+    /// 16 is hardcoded rather than imported: `HEX_BYTES_PER_ROW` is
+    /// `pub(super)` inside `view::ui::split_rendering` and not reachable from
+    /// `app`. Existing precedent does the same in `view_actions.rs`.
+    pub(crate) fn park_hex_viewport_on(&mut self, offset: usize) {
+        let rows_above = (self.active_viewport().height as usize / 3).max(1);
+        let row_start = offset - (offset % 16);
+        let top = row_start.saturating_sub(rows_above * 16);
+        let vp = self.active_viewport_mut();
+        vp.set_top_byte(top);
+        vp.set_top_view_line_offset(0);
+        vp.set_skip_ensure_visible();
+    }
+
     /// Get the viewport for the active split
     pub fn active_viewport(&self) -> &crate::view::viewport::Viewport {
         let active_split = self

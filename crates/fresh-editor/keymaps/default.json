@@ -1345,6 +1345,14 @@
       "when": "searchPrompt"
     },
     {
+      "comment": "Toggle hex byte-pattern search (mnemonic: heX). searchPrompt only, so it shadows the global Alt+X Explorer menu only while a find/replace prompt is up.",
+      "key": "x",
+      "modifiers": ["alt"],
+      "action": "toggle_search_hex",
+      "args": {},
+      "when": "searchPrompt"
+    },
+    {
       "comment": "Toggle confirm each in search/replace (mnemonic: I for Interactive)",
       "key": "i",
       "modifiers": ["alt"],

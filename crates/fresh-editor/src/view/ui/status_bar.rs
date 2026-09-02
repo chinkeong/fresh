@@ -409,6 +409,7 @@ pub enum SearchOptionsHover {
     CaseSensitive,
     WholeWord,
     Regex,
+    Hex,
     ConfirmEach,
 }
 
@@ -423,6 +424,8 @@ pub struct SearchOptionsLayout {
     pub whole_word: Option<(u16, u16)>,
     /// Regex checkbox area (start_col, end_col)
     pub regex: Option<(u16, u16)>,
+    /// Hex byte-pattern checkbox area (start_col, end_col)
+    pub hex: Option<(u16, u16)>,
     /// Confirm Each checkbox area (start_col, end_col) - only present in replace mode
     pub confirm_each: Option<(u16, u16)>,
 }
@@ -496,6 +499,12 @@ impl SearchOptionsLayout {
             &crate::input::keybindings::Action::ToggleSearchRegex,
         );
         layout.regex = Some((col, col + w));
+        col += w + 3;
+        let w = item_width(
+            t!("search.hex").to_string(),
+            &crate::input::keybindings::Action::ToggleSearchHex,
+        );
+        layout.hex = Some((col, col + w));
         col += w;
         if confirm_shown {
             if use_regex {
@@ -530,6 +539,11 @@ impl SearchOptionsLayout {
         if let Some((start, end)) = self.regex {
             if x >= start && x < end {
                 return Some(SearchOptionsHover::Regex);
+            }
+        }
+        if let Some((start, end)) = self.hex {
+            if x >= start && x < end {
+                return Some(SearchOptionsHover::Hex);
             }
         }
         if let Some((start, end)) = self.confirm_each {
@@ -2292,6 +2306,7 @@ impl StatusBarRenderer {
         case_sensitive: bool,
         whole_word: bool,
         use_regex: bool,
+        use_hex: bool,
         confirm_each: Option<bool>, // None = don't show, Some(value) = show with this state
         theme: &crate::view::theme::Theme,
         keybindings: &crate::input::keybindings::KeybindingResolver,
@@ -2342,11 +2357,13 @@ impl StatusBarRenderer {
             get_shortcut(&crate::input::keybindings::Action::ToggleSearchCaseSensitive);
         let word_shortcut = get_shortcut(&crate::input::keybindings::Action::ToggleSearchWholeWord);
         let regex_shortcut = get_shortcut(&crate::input::keybindings::Action::ToggleSearchRegex);
+        let hex_shortcut = get_shortcut(&crate::input::keybindings::Action::ToggleSearchHex);
 
         // Build the options display with checkboxes
         let case_checkbox = if case_sensitive { "[x]" } else { "[ ]" };
         let word_checkbox = if whole_word { "[x]" } else { "[ ]" };
         let regex_checkbox = if use_regex { "[x]" } else { "[ ]" };
+        let hex_checkbox = if use_hex { "[x]" } else { "[ ]" };
 
         // Style for active (checked) options. The toolbar already draws its
         // base on `menu_dropdown_*` and its hover on `menu_hover_*`, so the
@@ -2478,6 +2495,38 @@ impl StatusBarRenderer {
         }
         current_col += regex_full_width as u16;
         layout.regex = Some((regex_start, current_col));
+
+        // Separator — the +3 here mirrors the `col += w + 3` in
+        // `SearchOptionsLayout::compute`. The two walks are compared by the
+        // `debug_assert_eq!` below, so they must advance identically.
+        spans.push(Span::styled("   ", base_style));
+        current_col += 3;
+
+        // Hex byte-pattern option
+        let hex_hovered = hover == SearchOptionsHover::Hex;
+        let hex_start = current_col;
+        let hex_label = format!("{} {}", hex_checkbox, t!("search.hex"));
+        let hex_shortcut_text = hex_shortcut
+            .as_ref()
+            .map(|s| format!(" ({})", s))
+            .unwrap_or_default();
+        let hex_full_width = str_width(&hex_label) + str_width(&hex_shortcut_text);
+        spans.push(Span::styled(
+            hex_label,
+            get_checkbox_style(hex_hovered, use_hex),
+        ));
+        if !hex_shortcut_text.is_empty() {
+            spans.push(Span::styled(
+                hex_shortcut_text,
+                if hex_hovered {
+                    hover_shortcut_style
+                } else {
+                    shortcut_style
+                },
+            ));
+        }
+        current_col += hex_full_width as u16;
+        layout.hex = Some((hex_start, current_col));
 
         // Show capture group hint when regex is enabled in replace mode
         if use_regex && confirm_each.is_some() {

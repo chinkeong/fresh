@@ -405,3 +405,143 @@ fn hex_view_toggles_back_to_text() {
         "toggling back must restore the text view, got:\n{screen}"
     );
 }
+
+/// A 4 KiB fixture whose every 16-byte row begins with its own row number, so
+/// a rendered row identifies itself: row N is `N 52 4F 57` ("N R O W") at byte
+/// N*16.
+fn hex_probe_harness() -> EditorTestHarness {
+    let mut harness = EditorTestHarness::with_temp_project(140, 30).unwrap();
+    let root = harness.project_dir().unwrap();
+    let mut data = Vec::new();
+    for row in 0u16..256 {
+        data.push(row as u8);
+        data.extend_from_slice(b"ROW");
+        data.extend_from_slice(&[0u8; 12]);
+    }
+    fs::write(root.join("probe.bin"), &data).unwrap();
+
+    harness.editor_mut().enable_explorer_list_mode();
+    harness.wait_for_file_explorer_item("probe.bin").unwrap();
+    down(&mut harness, 2);
+    harness
+        .send_key(KeyCode::Enter, KeyModifiers::NONE)
+        .unwrap();
+    harness
+        .wait_until(|h| h.get_tab_bar().contains("probe.bin"))
+        .unwrap();
+    harness
+        .send_key(KeyCode::Char('h'), KeyModifiers::NONE)
+        .unwrap();
+    harness
+        .wait_until(|h| h.screen_to_string().contains("0000-0000"))
+        .unwrap();
+    harness
+}
+
+/// The search options row carries a fourth checkbox. Asserted alongside the
+/// existing three: the row's column math is duplicated between
+/// `SearchOptionsLayout::compute` and the paint walk, and a `debug_assert_eq!`
+/// compares them — so this test failing to even render is the signal that the
+/// two drifted.
+#[test]
+fn search_options_row_offers_a_hex_checkbox() {
+    let mut harness = hex_probe_harness();
+    harness
+        .send_key(KeyCode::Char('f'), KeyModifiers::CONTROL)
+        .unwrap();
+    harness
+        .wait_until(|h| h.screen_to_string().contains("Case Sensitive"))
+        .unwrap();
+
+    let screen = harness.screen_to_string();
+    let row = screen
+        .lines()
+        .find(|l| l.contains("Case Sensitive"))
+        .unwrap_or_else(|| panic!("no options row, got:\n{screen}"));
+    assert!(
+        row.contains("Regex") && row.contains("Hex"),
+        "the options row must offer Hex beside Regex, got:\n{row}"
+    );
+}
+
+/// A hex byte pattern finds raw bytes and scrolls the dump to them.
+///
+/// The offset is what matters, so the assertion is on the rendered address row
+/// rather than a match count — a count of 1 would pass even if the editor
+/// jumped to the wrong place.
+#[test]
+fn hex_search_finds_a_byte_pattern_at_the_right_offset() {
+    let mut harness = hex_probe_harness();
+    harness
+        .send_key(KeyCode::Char('f'), KeyModifiers::CONTROL)
+        .unwrap();
+    harness
+        .wait_until(|h| h.screen_to_string().contains("Case Sensitive"))
+        .unwrap();
+    harness
+        .send_key(KeyCode::Char('x'), KeyModifiers::ALT)
+        .unwrap();
+
+    // Row 0xC8 lives at byte 0xC8 * 16 = 0x0C80, far below the opening screen.
+    for c in "C8 52 4F 57".chars() {
+        harness
+            .send_key(KeyCode::Char(c), KeyModifiers::NONE)
+            .unwrap();
+    }
+    harness
+        .send_key(KeyCode::Enter, KeyModifiers::NONE)
+        .unwrap();
+    harness
+        .wait_until(|h| h.screen_to_string().contains("0000-0C80"))
+        .unwrap();
+
+    let screen = harness.screen_to_string();
+    let hit = screen
+        .lines()
+        .find(|l| l.contains("0000-0C80"))
+        .unwrap_or_else(|| panic!("dump did not scroll to the match, got:\n{screen}"));
+    assert!(
+        hit.contains("C8 52 4F 57"),
+        "the match row must show the searched bytes, got:\n{hit}"
+    );
+    // Regression: the line-based scroll used to leave the dump blank.
+    assert!(
+        screen.contains("Address") && screen.contains("DUMP"),
+        "the dump must still be rendered after a search, got:\n{screen}"
+    );
+}
+
+/// Ctrl+G in hex mode is an address prompt, and jumping scrolls the dump.
+#[test]
+fn goto_address_jumps_the_dump_to_that_address() {
+    let mut harness = hex_probe_harness();
+    harness
+        .send_key(KeyCode::Char('g'), KeyModifiers::CONTROL)
+        .unwrap();
+    harness
+        .wait_until(|h| h.screen_to_string().contains("Go to address"))
+        .unwrap();
+
+    for c in "0000-0A00".chars() {
+        harness
+            .send_key(KeyCode::Char(c), KeyModifiers::NONE)
+            .unwrap();
+    }
+    harness
+        .send_key(KeyCode::Enter, KeyModifiers::NONE)
+        .unwrap();
+    harness
+        .wait_until(|h| h.screen_to_string().contains("0000-0A00"))
+        .unwrap();
+
+    let screen = harness.screen_to_string();
+    let hit = screen
+        .lines()
+        .find(|l| l.contains("0000-0A00"))
+        .unwrap_or_else(|| panic!("dump did not scroll to the address, got:\n{screen}"));
+    // 0x0A00 / 16 = row 0xA0, so the row's first byte is 0xA0.
+    assert!(
+        hit.contains("A0 52 4F 57"),
+        "the address row must be the one holding that byte, got:\n{hit}"
+    );
+}

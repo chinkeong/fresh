@@ -208,8 +208,18 @@ impl Editor {
                 self.init_folder_open_state();
             }
             Action::GotoLine => {
-                let has_line_index = self.active_buffer_has_line_index();
-                if has_line_index {
+                // A hex dump addresses its rows by byte, so Ctrl+G here must
+                // resolve an address, not a line. Reuse `GotoByteOffset` rather
+                // than `GotoLine`: it already resolves input to an absolute
+                // byte, and it carries none of the goto-line live preview,
+                // which re-parses on every keystroke and would jump to *line*
+                // 10 while the user is halfway through typing address 0x10.
+                if self.active_view_mode() == crate::state::ViewMode::Hex {
+                    self.start_prompt(
+                        t!("goto.address_prompt").to_string(),
+                        PromptType::GotoByteOffset,
+                    );
+                } else if self.active_buffer_has_line_index() {
                     self.start_prompt(
                         t!("file.goto_line_prompt").to_string(),
                         PromptType::GotoLine,
@@ -1367,6 +1377,7 @@ impl Editor {
             Action::ToggleSearchCaseSensitive if !self.active_prompt_has_search_options() => {}
             Action::ToggleSearchWholeWord if !self.active_prompt_has_search_options() => {}
             Action::ToggleSearchRegex if !self.active_prompt_has_search_options() => {}
+            Action::ToggleSearchHex if !self.active_prompt_has_search_options() => {}
             Action::ToggleSearchCaseSensitive => {
                 self.active_window_mut().search_case_sensitive =
                     !self.active_window().search_case_sensitive;
@@ -1399,6 +1410,16 @@ impl Editor {
                     "disabled"
                 };
                 self.set_status_message(t!("search.regex_state", state = state).to_string());
+                self.refresh_active_search();
+            }
+            Action::ToggleSearchHex => {
+                self.active_window_mut().search_use_hex = !self.active_window().search_use_hex;
+                let state = if self.active_window().search_use_hex {
+                    "enabled"
+                } else {
+                    "disabled"
+                };
+                self.set_status_message(t!("search.hex_state", state = state).to_string());
                 self.refresh_active_search();
             }
             Action::ToggleSearchConfirmEach => {

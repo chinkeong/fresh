@@ -64,6 +64,8 @@ pub enum HoverTarget {
     SearchOptionWholeWord,
     /// Hovering over the search options "Regex" checkbox
     SearchOptionRegex,
+    /// Hovering over the search options "Hex" checkbox
+    SearchOptionHex,
     /// Hovering over the search options "Confirm Each" checkbox
     SearchOptionConfirmEach,
     /// Hovering over an item (by index) in whichever native context menu is

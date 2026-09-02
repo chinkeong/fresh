@@ -61,6 +61,13 @@ impl Editor {
     fn move_cursor_to_match(&mut self, position: usize) {
         self.active_window_mut()
             .jump_active_cursor_to(position, super::navigation::JumpOptions::navigation());
+        // `jump_active_cursor_to` centres the viewport with line-based math. In
+        // a hex dump that lands `top_byte` somewhere the byte-addressed
+        // producer cannot draw from, and the pane renders blank — so re-park it
+        // on the match's own row.
+        if self.active_view_mode() == crate::state::ViewMode::Hex {
+            self.park_hex_viewport_on(position);
+        }
     }
 
     pub(super) fn perform_search(&mut self, query: &str) {
@@ -71,6 +78,32 @@ impl Editor {
         }
 
         let search_range = self.active_window_mut().pending_search_range.take();
+
+        // A hex pattern never takes the character path below. That path
+        // materialises the buffer with `String::from_utf8_lossy`, which turns
+        // each invalid byte into a 3-byte U+FFFD — so every reported offset
+        // after the first such byte is wrong, which in a binary is everywhere.
+        // The chunked byte scanner reads raw `&[u8]` from the piece tree and
+        // reports true offsets, so hex always goes there regardless of size.
+        if self.active_window().search_use_hex {
+            match crate::app::regex_replace::parse_hex_pattern(query) {
+                Ok(bytes) => match crate::app::regex_replace::build_byte_search_regex(&bytes) {
+                    Ok(re) => {
+                        let len = bytes.len();
+                        self.start_byte_search_scan(query, re, len);
+                    }
+                    Err(e) => {
+                        self.active_window_mut().search_state = None;
+                        self.set_status_message(e);
+                    }
+                },
+                Err(e) => {
+                    self.active_window_mut().search_state = None;
+                    self.set_status_message(e);
+                }
+            }
+            return;
+        }
 
         // Build the regex early so we can bail on invalid patterns
         let regex = match self.active_window().build_search_regex(query) {
@@ -366,10 +399,38 @@ impl Editor {
     /// that `process_search_scan()` (called from `editor_tick()`) will
     /// consume a few chunks per frame.
     fn start_search_scan(&mut self, query: &str, regex: regex::Regex) {
-        let buffer_id = self.active_buffer();
         // Pre-snapshot per-window search settings before taking the &mut
         // borrow on self.windows below.
         let case_sensitive = self.active_window().search_case_sensitive;
+        // Build a bytes::Regex from the same pattern for the chunked scanner.
+        // `as_str()` carries only the pattern, not the builder flags, so
+        // re-apply line-anchoring here to keep `^`/`$` matching every
+        // line boundary in the chunked scan (matches the inline path).
+        let bytes_regex = regex::bytes::RegexBuilder::new(regex.as_str())
+            .case_insensitive(!case_sensitive)
+            .multi_line(true)
+            .crlf(true)
+            .build()
+            .expect("regex already validated");
+        self.start_byte_search_scan(query, bytes_regex, query.len());
+    }
+
+    /// Start an incremental scan over the buffer's RAW BYTES with an
+    /// already-compiled byte regex.
+    ///
+    /// The only engine that can honour a hex byte pattern: it feeds `&[u8]`
+    /// chunks straight from the piece tree, so no UTF-8 round-trip ever touches
+    /// the haystack. `pattern_len` is the match length in BYTES — for a hex
+    /// query that is the *decoded* length, not the typed string's, because it
+    /// sizes the overlap between chunks and an under-estimate silently drops
+    /// matches that straddle a boundary.
+    fn start_byte_search_scan(
+        &mut self,
+        query: &str,
+        bytes_regex: regex::bytes::Regex,
+        pattern_len: usize,
+    ) {
+        let buffer_id = self.active_buffer();
         if let Some(state) = self
             .windows
             .get_mut(&self.active_window)
@@ -378,20 +439,10 @@ impl Editor {
             .get_mut(&buffer_id)
         {
             let leaves = state.buffer.piece_tree_leaves();
-            // Build a bytes::Regex from the same pattern for the chunked scanner
-            // `as_str()` carries only the pattern, not the builder flags, so
-            // re-apply line-anchoring here to keep `^`/`$` matching every
-            // line boundary in the chunked scan (matches the inline path).
-            let bytes_regex = regex::bytes::RegexBuilder::new(regex.as_str())
-                .case_insensitive(!case_sensitive)
-                .multi_line(true)
-                .crlf(true)
-                .build()
-                .expect("regex already validated");
             let scan = state.buffer.search_scan_init(
                 bytes_regex,
                 super::SearchState::MAX_MATCHES,
-                query.len(),
+                pattern_len,
             );
             let cs = self.active_window().search_case_sensitive;
             let ww = self.active_window().search_whole_word;

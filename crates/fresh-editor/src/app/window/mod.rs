@@ -806,6 +806,8 @@ pub struct Window {
     pub search_case_sensitive: bool,
     pub search_whole_word: bool,
     pub search_use_regex: bool,
+    /// Interpret the search query as a hex byte pattern rather than text.
+    pub search_use_hex: bool,
     pub search_confirm_each: bool,
 
     /// Scheduled (debounced) per-buffer LSP feature requests for the
@@ -2378,6 +2380,7 @@ impl Window {
             search_case_sensitive: true,
             search_whole_word: false,
             search_use_regex: false,
+            search_use_hex: false,
             search_confirm_each: false,
             scheduled_diagnostic_pull: None,
             scheduled_inlay_hints_request: None,

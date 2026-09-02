@@ -508,6 +508,8 @@ pub enum Action {
     ToggleSearchCaseSensitive,
     ToggleSearchWholeWord,
     ToggleSearchRegex,
+    /// Interpret the search query as a hex byte pattern (`00 01 02 03`).
+    ToggleSearchHex,
     ToggleSearchConfirmEach,
 
     // Macros
@@ -1080,6 +1082,7 @@ impl Action {
             "toggle_search_case_sensitive" => ToggleSearchCaseSensitive,
             "toggle_search_whole_word" => ToggleSearchWholeWord,
             "toggle_search_regex" => ToggleSearchRegex,
+            "toggle_search_hex" => ToggleSearchHex,
             "toggle_search_confirm_each" => ToggleSearchConfirmEach,
 
             "start_macro_recording" => StartMacroRecording,
@@ -2793,6 +2796,7 @@ impl KeybindingResolver {
             Action::ToggleSearchCaseSensitive => t!("action.toggle_search_case_sensitive"),
             Action::ToggleSearchWholeWord => t!("action.toggle_search_whole_word"),
             Action::ToggleSearchRegex => t!("action.toggle_search_regex"),
+            Action::ToggleSearchHex => t!("action.toggle_search_hex"),
             Action::ToggleSearchConfirmEach => t!("action.toggle_search_confirm_each"),
             Action::StartMacroRecording => t!("action.start_macro_recording"),
             Action::StopMacroRecording => t!("action.stop_macro_recording"),

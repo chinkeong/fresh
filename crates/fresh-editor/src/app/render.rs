@@ -1358,6 +1358,7 @@ impl Editor {
                 Some(HoverTarget::SearchOptionCaseSensitive) => SearchOptionsHover::CaseSensitive,
                 Some(HoverTarget::SearchOptionWholeWord) => SearchOptionsHover::WholeWord,
                 Some(HoverTarget::SearchOptionRegex) => SearchOptionsHover::Regex,
+                Some(HoverTarget::SearchOptionHex) => SearchOptionsHover::Hex,
                 Some(HoverTarget::SearchOptionConfirmEach) => SearchOptionsHover::ConfirmEach,
                 _ => SearchOptionsHover::None,
             };
@@ -1368,6 +1369,7 @@ impl Editor {
                 self.active_window().search_case_sensitive,
                 self.active_window().search_whole_word,
                 self.active_window().search_use_regex,
+                self.active_window().search_use_hex,
                 confirm_each,
                 theme,
                 keybindings,
