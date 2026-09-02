@@ -185,6 +185,7 @@ impl Editor {
         // committed tab must not be demoted back to preview, and the existing
         // preview (if any, in whichever split) is still valid.
         if !is_new {
+            self.default_to_hex_if_binary();
             return Ok(buffer_id);
         }
 
@@ -221,6 +222,9 @@ impl Editor {
 
         // Anchor the new buffer as the preview — the single source of truth.
         self.active_window_mut().preview = Some((target_split, buffer_id));
+
+        // A previewed binary shows the dump, exactly as an opened one does.
+        self.default_to_hex_if_binary();
 
         Ok(buffer_id)
     }

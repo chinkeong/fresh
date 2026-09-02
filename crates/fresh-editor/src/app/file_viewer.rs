@@ -83,17 +83,7 @@ impl Editor {
             window.mark_buffer_read_only(buffer_id, true);
         }
 
-        // A binary opens as a hex dump. The alternative — the text renderer's
-        // `<7F><45><4C>` escape soup — is not a useful way to look at bytes,
-        // and anyone opening a binary in a viewer wants the dump. `H` toggles
-        // back to that escape rendering for the rare time it is wanted.
-        //
-        // Text files are untouched: defaulting a `.txt` to hex would be absurd.
-        if self.active_state().buffer.is_binary()
-            && self.active_view_mode() != crate::state::ViewMode::Hex
-        {
-            self.active_window_mut().handle_toggle_hex_view();
-        }
+        self.default_to_hex_if_binary();
 
         // Browsing is a sequence of glances, and without this each glance
         // leaves a tab behind — walk a directory of fifty files and you have
@@ -161,6 +151,26 @@ impl Editor {
             if adopted || self.close_buffer(id).is_ok() {
                 self.active_window_mut().viewer_buffers.remove(&id);
             }
+        }
+    }
+
+    /// Put the active split into hex view when the buffer is binary.
+    ///
+    /// The alternative — the text renderer's `<7F><45><4C>` escape soup — is
+    /// not a useful way to look at bytes, and anyone looking at a binary wants
+    /// the dump. `H` toggles back to that escape rendering for the times it is
+    /// wanted. Text files are untouched: defaulting a `.txt` to hex would be
+    /// absurd.
+    ///
+    /// Shared by the read-only viewer and the explorer's preview so the two
+    /// cannot disagree about what opening a binary looks like — they did, and
+    /// a previewed binary came up as escape soup while an Entered one came up
+    /// as a dump.
+    pub(crate) fn default_to_hex_if_binary(&mut self) {
+        if self.active_state().buffer.is_binary()
+            && self.active_view_mode() != crate::state::ViewMode::Hex
+        {
+            self.active_window_mut().handle_toggle_hex_view();
         }
     }
 

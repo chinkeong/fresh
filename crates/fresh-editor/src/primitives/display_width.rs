@@ -34,9 +34,25 @@ impl DisplayWidth for String {
 /// Calculate the visual column (display width) at a given byte offset within a string.
 ///
 /// Returns the sum of display widths of all characters before the given byte offset.
+///
+/// `byte_offset` is clamped to the string's length *and floored to a character
+/// boundary*. Both are load-bearing. Callers routinely hold an offset in a
+/// different coordinate space than the string they are indexing — most sharply
+/// [`visual_column_of`], which measures a `from_utf8_lossy` rendering of a line
+/// using a raw *buffer* offset. Lossy decoding replaces each invalid byte with
+/// a 3-byte U+FFFD, so on any non-UTF-8 content the offset lands mid-character,
+/// and a bare `&s[..n]` panics — which is a crash on something as ordinary as
+/// clicking in a binary file.
+///
+/// Flooring is also the correct answer, not merely a safe one: a byte inside a
+/// character sits at that character's column.
 #[inline]
 pub fn visual_column_at_byte(s: &str, byte_offset: usize) -> usize {
-    s[..byte_offset.min(s.len())].chars().map(char_width).sum()
+    let mut end = byte_offset.min(s.len());
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    s[..end].chars().map(char_width).sum()
 }
 
 /// Convert a visual column to a byte offset within a string.
@@ -192,5 +208,46 @@ mod tests {
 
         let string = String::from("Hello🚀");
         assert_eq!(string.display_width(), 7);
+    }
+}
+
+#[cfg(test)]
+mod boundary_safety_tests {
+    use super::*;
+
+    /// Regression: clicking in a binary file crashed the editor.
+    ///
+    /// `visual_column_of` measures a `from_utf8_lossy` rendering of a line but
+    /// indexes it with a raw *buffer* offset. Lossy decoding turns each invalid
+    /// byte into a 3-byte U+FFFD, so the two coordinate spaces diverge and the
+    /// offset lands mid-character — `&s[..n]` then panics.
+    #[test]
+    fn mid_character_offsets_do_not_panic() {
+        let lossy = String::from_utf8_lossy(&[0xDE, 0xAD, 0xBE, 0xEF, b'A']).into_owned();
+        // Every offset into this string must be answerable, boundary or not.
+        for offset in 0..=lossy.len() + 4 {
+            let _ = visual_column_at_byte(&lossy, offset);
+        }
+    }
+
+    /// Flooring is the right answer, not just a safe one: a byte inside a
+    /// character reports that character's column, so the caret lands on the
+    /// character the user clicked rather than past it.
+    #[test]
+    fn a_byte_inside_a_character_reports_that_characters_column() {
+        // "aé" — 'é' occupies bytes 1..3.
+        let s = "aé";
+        assert_eq!(visual_column_at_byte(s, 0), 0);
+        assert_eq!(visual_column_at_byte(s, 1), 1); // start of 'é'
+        assert_eq!(visual_column_at_byte(s, 2), 1); // INSIDE 'é' — floors back
+        assert_eq!(visual_column_at_byte(s, 3), 2); // past 'é'
+    }
+
+    /// Offsets beyond the string still clamp to its full width.
+    #[test]
+    fn offsets_past_the_end_clamp_to_full_width() {
+        let s = "abc";
+        assert_eq!(visual_column_at_byte(s, 3), 3);
+        assert_eq!(visual_column_at_byte(s, 99), 3);
     }
 }
