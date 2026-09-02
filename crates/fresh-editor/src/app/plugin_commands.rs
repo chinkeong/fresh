@@ -1826,6 +1826,7 @@ impl Editor {
         use crate::state::ViewMode;
         let view_mode = match mode {
             "page_view" | "compose" => ViewMode::PageView,
+            "hex" => ViewMode::Hex,
             _ => ViewMode::Source,
         };
         // Set on the specified buffer's per-split view state.

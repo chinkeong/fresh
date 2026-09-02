@@ -806,6 +806,9 @@ impl Editor {
                 };
                 self.set_status_message(t!("view.read_only_state", state = state_str).to_string());
             }
+            Action::ToggleHexView => {
+                self.active_window_mut().handle_toggle_hex_view();
+            }
             Action::TogglePageView => {
                 self.active_window_mut().handle_toggle_page_view();
             }

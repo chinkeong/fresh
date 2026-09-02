@@ -11,6 +11,63 @@ use crate::state::ViewMode;
 use fresh_i18n::t;
 
 impl Window {
+    /// Toggle the active split between text and a hex dump of the same bytes.
+    ///
+    /// A *view* toggle, not a conversion: the buffer is untouched and the bytes
+    /// on screen are the file's own bytes at their own offsets, so the cursor
+    /// keeps its position across the toggle and a search match stays
+    /// highlighted either way.
+    pub fn handle_toggle_hex_view(&mut self) {
+        let (mgr, vs_map) = self
+            .buffers
+            .splits()
+            .expect("active window must have a populated split layout");
+        let active_split = mgr.active_split();
+        let active_buffer = mgr
+            .get_buffer_id(active_split.into())
+            .unwrap_or(crate::model::event::BufferId(0));
+        let default_wrap = self.resolve_line_wrap_for_buffer(active_buffer);
+        let default_line_numbers = self.config().editor.line_numbers;
+
+        let current = vs_map
+            .get(&active_split)
+            .map(|vs| vs.view_mode.clone())
+            .unwrap_or(ViewMode::Source);
+        let view_mode = match current {
+            ViewMode::Hex => ViewMode::Source,
+            _ => ViewMode::Hex,
+        };
+
+        if let Some(vs) = self
+            .split_view_states_mut()
+            .expect("active window must have a populated split layout")
+            .get_mut(&active_split)
+        {
+            vs.view_mode = view_mode.clone();
+            match view_mode {
+                ViewMode::Hex => {
+                    vs.viewport.line_wrap_enabled = false;
+                    vs.show_line_numbers = false;
+                    vs.compose_width = None;
+                    // Rows are addressed by byte, so the top of the window has
+                    // to sit on a row boundary or every column shears.
+                    let top = vs.viewport.top_byte();
+                    vs.viewport.set_top_byte(top - (top % 16));
+                }
+                _ => {
+                    vs.viewport.line_wrap_enabled = vs.line_wrap_override.unwrap_or(default_wrap);
+                    vs.show_line_numbers = vs.line_numbers_override.unwrap_or(default_line_numbers);
+                }
+            }
+        }
+
+        let mode_label = match view_mode {
+            ViewMode::Hex => t!("view.hex_view").to_string(),
+            _ => "Source".to_string(),
+        };
+        self.set_status_message(t!("view.mode", mode = mode_label).to_string());
+    }
+
     /// Toggle between Compose and Source view modes for the active split.
     pub fn handle_toggle_page_view(&mut self) {
         let (mgr, _) = self
@@ -57,11 +114,22 @@ impl Window {
             // In Source mode, respect the user's default_wrap preference.
             vs.viewport.line_wrap_enabled = match view_mode {
                 ViewMode::PageView => false,
+                // Fixed 16-byte rows: there is no long line to wrap, and
+                // wrapping one would break the column alignment.
+                ViewMode::Hex => false,
                 // A per-buffer override wins over the global/language default
                 // when returning to Source mode.
                 ViewMode::Source => vs.line_wrap_override.unwrap_or(default_wrap),
             };
             match view_mode {
+                ViewMode::Hex => {
+                    // The dump draws its own address column, so the gutter
+                    // would be a second, disagreeing one. `compose_width` is
+                    // cleared because it survives a previous PageView and would
+                    // otherwise centre the dump inside a paper margin.
+                    vs.show_line_numbers = false;
+                    vs.compose_width = None;
+                }
                 ViewMode::PageView => {
                     vs.show_line_numbers = false;
                     // Apply page_width from language config if available
@@ -80,6 +148,7 @@ impl Window {
 
         let mode_label = match view_mode {
             ViewMode::PageView => t!("view.page_view").to_string(),
+            ViewMode::Hex => t!("view.hex_view").to_string(),
             ViewMode::Source => "Source".to_string(),
         };
         self.set_status_message(t!("view.mode", mode = mode_label).to_string());

@@ -5,7 +5,7 @@
 //! `transforms`, `folding`, and `style` — its only dependencies are the
 //! (also self-contained) sibling modules and a few editor state types.
 
-use super::base_tokens::build_base_tokens;
+use super::base_tokens::{build_base_tokens, build_base_tokens_hex};
 use super::folding::{apply_folding, fold_adjusted_visible_count, fold_skip_set};
 use super::style::fold_placeholder_style;
 use super::transforms::{
@@ -235,6 +235,13 @@ pub(super) fn build_view_data(
         Some(a) => (a.byte, Some(a.carry), a.skip),
         None => (viewport.top_byte(), None, viewport.top_view_line_offset()),
     };
+    // A hex dump is produced from raw bytes at fixed 16-byte rows, so none of
+    // the text-shaped machinery below applies: no line iterator, no wrap width,
+    // no fold skipping (a fold is a range of *lines*). Returning early keeps
+    // the two producers from having to agree about parameters neither shares.
+    if matches!(view_mode, ViewMode::Hex) {
+        return hex_view_data(state, viewport, adjusted_visible_count);
+    }
     let base_tokens = build_base_tokens(
         &mut state.buffer,
         start_byte,
@@ -428,5 +435,45 @@ pub(super) fn build_view_data(
     ViewData {
         lines,
         first_drawn: rows_before_window,
+    }
+}
+
+/// Build the display lines for a hex dump.
+///
+/// Deliberately bypasses everything the text path does between tokens and
+/// lines: wrapping, folds, conceals, soft breaks, virtual text and inlay hints
+/// are all anchored to text semantics a byte dump does not have, and splicing
+/// any of them in would shift the columns out of alignment. That is not
+/// hypothetical — those decorations are buffer-global and marker-anchored, so a
+/// plugin that decorated this buffer in text mode still has live decorations
+/// pointing into it.
+fn hex_view_data(state: &mut EditorState, viewport: &Viewport, visible_count: usize) -> ViewData {
+    let tokens = build_base_tokens_hex(&mut state.buffer, viewport.top_byte(), visible_count);
+    let at_buffer_end = {
+        let max_source_offset = tokens
+            .iter()
+            .filter_map(|t| t.source_offset)
+            .max()
+            .unwrap_or(0);
+        max_source_offset + 2 >= state.buffer.len()
+    };
+    let lines: Vec<ViewLine> = ViewLineIterator::new(
+        &tokens,
+        // Not the binary `<XX>` treatment: this stream already *is* the bytes,
+        // spelled out. Asking for it again would re-encode the hex digits.
+        false,
+        // Never ANSI-aware. The dump prints an ESC byte as `1B` and `.`, but the
+        // iterator would otherwise be free to read a printed `1B`/`5B` pair as
+        // the start of an escape sequence, give it zero width, and shear the
+        // columns.
+        false,
+        state.buffer_settings.tab_size,
+        at_buffer_end,
+    )
+    .collect();
+
+    ViewData {
+        lines,
+        first_drawn: 0,
     }
 }

@@ -3374,6 +3374,7 @@ pub fn action_to_events(
         | Action::ToggleOccurrenceHighlight
         | Action::ToggleReadOnly
         | Action::TogglePageView
+        | Action::ToggleHexView
         | Action::SetPageWidth
         | Action::IncreaseSplitSize
         | Action::DecreaseSplitSize

@@ -6522,6 +6522,7 @@ impl Window {
                 .map(|bs| match bs.view_mode {
                     crate::state::ViewMode::Source => "source",
                     crate::state::ViewMode::PageView => "compose",
+                    crate::state::ViewMode::Hex => "hex",
                 })
                 .unwrap_or("source");
             let compose_width = active_vs_opt

@@ -289,3 +289,119 @@ fn single_click_on_a_file_opens_nothing() {
         "a single click must not open the file, tab bar was:\n{tabs}"
     );
 }
+
+/// `H` in the viewer shows the traditional three-column dump: a dashed
+/// address, sixteen bytes under a `00`..`0F` header, and the char column.
+///
+/// Asserted as whole rows rather than by fishing for `DE` somewhere on screen —
+/// the columns only mean anything together, and a per-token assertion would
+/// pass on a dump whose alignment had drifted.
+#[test]
+fn hex_view_renders_address_bytes_and_dump_columns() {
+    let mut harness = EditorTestHarness::with_temp_project(120, 30).unwrap();
+    let root = harness.project_dir().unwrap();
+    let mut bytes = vec![0x7F, 0x45, 0x4C, 0x46, 0x02, 0x01, 0x01, 0x00];
+    bytes.extend_from_slice(&[0x00; 8]);
+    bytes.extend_from_slice(&[0xDE, 0xAD, 0xBE, 0xEF]);
+    bytes.extend_from_slice(b"Hello");
+    fs::write(root.join("sample.bin"), &bytes).unwrap();
+
+    harness.editor_mut().enable_explorer_list_mode();
+    harness.wait_for_file_explorer_item("sample.bin").unwrap();
+    down(&mut harness, 2); // root row, `..`, then sample.bin
+    harness
+        .send_key(KeyCode::Enter, KeyModifiers::NONE)
+        .unwrap();
+    harness
+        .wait_until(|h| h.get_tab_bar().contains("sample.bin"))
+        .unwrap();
+
+    harness
+        .send_key(KeyCode::Char('h'), KeyModifiers::NONE)
+        .unwrap();
+    harness
+        .wait_until(|h| h.screen_to_string().contains("0000-0000"))
+        .unwrap();
+
+    let screen = harness.screen_to_string();
+
+    let header = screen
+        .lines()
+        .find(|l| l.contains("Address"))
+        .unwrap_or_else(|| panic!("no header row, got:\n{screen}"));
+    assert!(
+        header.contains("00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F"),
+        "header must label all sixteen byte columns, got:\n{header}"
+    );
+    assert!(
+        header.contains("DUMP"),
+        "header must name the dump column, got:\n{header}"
+    );
+
+    let first = screen
+        .lines()
+        .find(|l| l.contains("0000-0000"))
+        .unwrap_or_else(|| panic!("no first data row, got:\n{screen}"));
+    assert!(
+        first.contains("7F 45 4C 46 02 01 01 00"),
+        "first row must show the file's opening bytes, got:\n{first}"
+    );
+    assert!(
+        first.contains(".ELF"),
+        "the dump column must render printable bytes as characters, got:\n{first}"
+    );
+
+    // Second row proves the address advances by 0x10 and that a high byte
+    // survives as hex while showing as `.` in the dump.
+    let second = screen
+        .lines()
+        .find(|l| l.contains("0000-0010"))
+        .unwrap_or_else(|| panic!("no second data row, got:\n{screen}"));
+    assert!(
+        second.contains("DE AD BE EF"),
+        "high bytes must survive into the hex column, got:\n{second}"
+    );
+    assert!(
+        second.contains("Hello"),
+        "the dump column must keep tracking the same bytes, got:\n{second}"
+    );
+}
+
+/// `H` toggles back to text, so the test above cannot pass vacuously on a view
+/// that was never text to begin with.
+#[test]
+fn hex_view_toggles_back_to_text() {
+    let mut harness = EditorTestHarness::with_temp_project(120, 30).unwrap();
+    let root = harness.project_dir().unwrap();
+    fs::write(root.join("plain.txt"), "readable text here").unwrap();
+
+    harness.editor_mut().enable_explorer_list_mode();
+    harness.wait_for_file_explorer_item("plain.txt").unwrap();
+    down(&mut harness, 2);
+    harness
+        .send_key(KeyCode::Enter, KeyModifiers::NONE)
+        .unwrap();
+    harness
+        .wait_until(|h| h.get_tab_bar().contains("plain.txt"))
+        .unwrap();
+
+    harness
+        .send_key(KeyCode::Char('h'), KeyModifiers::NONE)
+        .unwrap();
+    harness
+        .wait_until(|h| h.screen_to_string().contains("0000-0000"))
+        .unwrap();
+
+    harness
+        .send_key(KeyCode::Char('h'), KeyModifiers::NONE)
+        .unwrap();
+    harness
+        .wait_until(|h| !h.screen_to_string().contains("0000-0000"))
+        .unwrap();
+
+    let screen = harness.screen_to_string();
+    assert!(
+        screen.contains("readable text here"),
+        "toggling back must restore the text view, got:\n{screen}"
+    );
+}

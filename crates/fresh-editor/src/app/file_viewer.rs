@@ -33,7 +33,17 @@ impl Editor {
             // actions are refused, and those are refused by the read-only flag
             // rather than by withholding bindings.
             kb.set_mode_inherits_normal_bindings(VIEWER_MODE, true);
-            // The other half of the LIST loop: Esc returns to the listing you
+            // `H` for the hex dump — the classic viewer key. Only unambiguous
+            // because the viewer is read-only, so a bare letter is free.
+            for key in [KeyCode::Char('h'), KeyCode::Char('H')] {
+                kb.load_plugin_default(
+                    KeyContext::Mode(VIEWER_MODE.to_string()),
+                    key,
+                    KeyModifiers::NONE,
+                    Action::ToggleHexView,
+                );
+            }
+            // The other half of the loop: Esc returns to the listing you
             // came from, so browse → view → browse never needs the mouse.
             kb.load_plugin_default(
                 KeyContext::Mode(VIEWER_MODE.to_string()),

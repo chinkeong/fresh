@@ -3250,6 +3250,10 @@ fn serialize_split_view_state(
                 view_mode: match buf_state.view_mode {
                     ViewMode::Source => SerializedViewMode::Source,
                     ViewMode::PageView => SerializedViewMode::PageView,
+                    // Hex is a way of *looking* at a file, not a property of
+                    // it; restoring a session into an unexplained dump would be
+                    // a worse surprise than losing the toggle.
+                    ViewMode::Hex => SerializedViewMode::Source,
                 },
                 compose_width: buf_state.compose_width,
                 line_numbers: buf_state.line_numbers_override,
@@ -3284,6 +3288,8 @@ fn serialize_split_view_state(
         .map(|bs| match bs.view_mode {
             ViewMode::Source => SerializedViewMode::Source,
             ViewMode::PageView => SerializedViewMode::PageView,
+            // Not persisted — see the buffer-level arm above.
+            ViewMode::Hex => SerializedViewMode::Source,
         })
         .unwrap_or(SerializedViewMode::Source);
     let active_compose_width = active_buffer

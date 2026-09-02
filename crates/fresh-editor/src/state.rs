@@ -77,6 +77,13 @@ pub enum ViewMode {
     /// Document-style page view with centered content, concealed markers,
     /// and plugin-driven word wrapping (previously called "compose mode")
     PageView,
+    /// Traditional three-column hex dump: address, sixteen bytes, char dump.
+    ///
+    /// Re-tokenizes the same buffer rather than building a second one, so the
+    /// bytes on screen are the file's own bytes at their own offsets — which is
+    /// what keeps the cursor, selection and search-match overlays working
+    /// across the toggle.
+    Hex,
 }
 
 /// Per-buffer user settings that should be preserved across file reloads (auto-revert).

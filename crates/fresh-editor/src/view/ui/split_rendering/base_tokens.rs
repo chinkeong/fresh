@@ -625,3 +625,187 @@ pub(crate) fn build_line_tokens_from(
     }
     tokens
 }
+
+/// Bytes per row of the hex dump — the `00`..`0F` the header column names.
+pub(super) const HEX_BYTES_PER_ROW: usize = 16;
+
+/// Width of the hex column: sixteen `XX` pairs joined by single spaces.
+const HEX_COL_WIDTH: usize = HEX_BYTES_PER_ROW * 3 - 1;
+
+/// Format a byte offset as the traditional dashed address, `0000-0000` through
+/// `FFFF-FFFF`. Beyond 4 GiB the high half simply keeps counting rather than
+/// wrapping, so the address stays unique and monotonic on a very large file.
+fn hex_address(offset: usize) -> String {
+    format!("{:04X}-{:04X}", offset >> 16, offset & 0xFFFF)
+}
+
+/// The dump column's rendering of one byte.
+///
+/// Printable ASCII shows as itself; everything else — control codes and the
+/// whole 0x80..0xFF half — shows as `.`. A high byte is not a character on its
+/// own (it is a fragment of a UTF-8 sequence, or not text at all), so emitting
+/// one would either corrupt the column's alignment or render as a replacement
+/// glyph of a different width.
+fn dump_char(b: u8) -> char {
+    if b.is_ascii_graphic() || b == b' ' {
+        b as char
+    } else {
+        '.'
+    }
+}
+
+/// Build tokens for a traditional three-column hex dump:
+///
+/// ```text
+/// Address    00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F  DUMP
+/// 0000-0000  7F 45 4C 46 02 01 01 00 00 00 00 00 00 00 00 00  .ELF............
+/// 0000-0010  02 00 3E 00 01 00 00 00 DE AD BE EF 48 65 6C 6C  ..>.........Hell
+/// ```
+///
+/// The critical property is that **every emitted character carries the real
+/// source byte offset it depicts** — each hex pair its own byte, and each dump
+/// character the same byte as its pair. That is what makes the rest of the
+/// editor keep working across the toggle: `ViewLine`'s char↔byte maps stay
+/// truthful, so cursor placement, mouse clicks, selection and search-match
+/// overlays all land correctly, and one byte-range overlay lights up *both* the
+/// hex column and its dump character for free.
+///
+/// Reads via [`Buffer::get_text_range_mut`] rather than `slice_bytes`: the
+/// latter is `get_text_range(..).unwrap_or_default()` and silently yields an
+/// empty vec when a piece is unloaded, which would render a lazily-loaded large
+/// file as a blank dump.
+///
+/// `top_byte` is floored to a row boundary here as well as by the caller: the
+/// render pass mutates the viewport's `top_byte` in several places, and one
+/// unaligned frame visibly shears every column.
+pub(super) fn build_base_tokens_hex(
+    buffer: &mut Buffer,
+    top_byte: usize,
+    visible_count: usize,
+) -> Vec<ViewTokenWire> {
+    let mut tokens = Vec::new();
+    let buffer_len = buffer.len();
+    let start = top_byte - (top_byte % HEX_BYTES_PER_ROW);
+
+    // The column header. Anchored to the first byte on screen rather than left
+    // offset-less, because the pipeline places the cursor against source
+    // offsets and a row carrying none cannot be reasoned about.
+    let header_offset = start.min(buffer_len);
+    let mut header = String::from("Address    ");
+    for i in 0..HEX_BYTES_PER_ROW {
+        if i > 0 {
+            header.push(' ');
+        }
+        header.push_str(&format!("{:02X}", i));
+    }
+    header.push_str("  DUMP");
+    push_text(&mut tokens, header, header_offset);
+    push_newline(&mut tokens, header_offset);
+
+    if start >= buffer_len {
+        return tokens;
+    }
+
+    // A couple of rows beyond the window so a partially-scrolled last row still
+    // has content, matching what the text producers do.
+    let rows = visible_count.saturating_add(2);
+    let end = (start + rows.saturating_mul(HEX_BYTES_PER_ROW)).min(buffer_len);
+
+    // A read failure (a vanished remote file, a chunk that will not load) must
+    // degrade to a header-only view, never panic: this runs inside the render
+    // pass.
+    let Ok(bytes) = buffer.get_text_range_mut(start, end - start) else {
+        return tokens;
+    };
+
+    for (row_index, chunk) in bytes.chunks(HEX_BYTES_PER_ROW).enumerate() {
+        let row_start = start + row_index * HEX_BYTES_PER_ROW;
+        // Anchor for a cell that depicts no byte (padding on a short final
+        // row): the row's last real byte, so a click there stays in range.
+        let row_last = row_start + chunk.len().saturating_sub(1);
+
+        push_text(
+            &mut tokens,
+            format!("{}  ", hex_address(row_start)),
+            row_start,
+        );
+
+        let mut hex_width = 0usize;
+        for (i, b) in chunk.iter().enumerate() {
+            if i > 0 {
+                push_text(&mut tokens, " ".to_string(), row_start + i);
+                hex_width += 1;
+            }
+            push_text(&mut tokens, format!("{:02X}", b), row_start + i);
+            hex_width += 2;
+        }
+        // Pad a short final row so its dump column still lines up.
+        if hex_width < HEX_COL_WIDTH {
+            push_text(&mut tokens, " ".repeat(HEX_COL_WIDTH - hex_width), row_last);
+        }
+
+        push_text(&mut tokens, "  ".to_string(), row_last);
+
+        for (i, b) in chunk.iter().enumerate() {
+            push_text(&mut tokens, dump_char(*b).to_string(), row_start + i);
+        }
+
+        push_newline(&mut tokens, row_last);
+    }
+
+    tokens
+}
+
+fn push_text(tokens: &mut Vec<ViewTokenWire>, text: String, offset: usize) {
+    tokens.push(ViewTokenWire {
+        source_offset: Some(offset),
+        kind: ViewTokenWireKind::Text(text),
+        style: None,
+    });
+}
+
+fn push_newline(tokens: &mut Vec<ViewTokenWire>, offset: usize) {
+    tokens.push(ViewTokenWire {
+        source_offset: Some(offset),
+        kind: ViewTokenWireKind::Newline,
+        style: None,
+    });
+}
+
+#[cfg(test)]
+mod hex_dump_tests {
+    use super::*;
+
+    #[test]
+    fn address_uses_the_dashed_four_four_form() {
+        assert_eq!(hex_address(0), "0000-0000");
+        assert_eq!(hex_address(0x10), "0000-0010");
+        assert_eq!(hex_address(0x1_0000), "0001-0000");
+        assert_eq!(hex_address(0xFFFF_FFFF), "FFFF-FFFF");
+    }
+
+    /// The dump column shows printable ASCII and nothing else. A high byte is a
+    /// UTF-8 fragment, not a character, so rendering it would break the
+    /// column's one-cell-per-byte alignment.
+    #[test]
+    fn dump_column_shows_printable_ascii_only() {
+        assert_eq!(dump_char(b'A'), 'A');
+        assert_eq!(dump_char(b' '), ' ');
+        assert_eq!(dump_char(0x00), '.');
+        assert_eq!(dump_char(0x1B), '.');
+        assert_eq!(dump_char(0xDE), '.');
+        assert_eq!(dump_char(0x7F), '.');
+    }
+
+    /// The header's byte labels must be exactly as wide as the hex column they
+    /// label, or every row sits under the wrong offset.
+    #[test]
+    fn header_labels_match_the_hex_column_width() {
+        let labels: Vec<String> = (0..HEX_BYTES_PER_ROW)
+            .map(|i| format!("{:02X}", i))
+            .collect();
+        assert_eq!(labels.join(" ").len(), HEX_COL_WIDTH);
+        assert_eq!(labels.first().map(String::as_str), Some("00"));
+        assert_eq!(labels.last().map(String::as_str), Some("0F"));
+    }
+}

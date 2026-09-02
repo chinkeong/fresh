@@ -578,6 +578,8 @@ pub enum Action {
     ToggleOccurrenceHighlight,
     ToggleReadOnly,
     TogglePageView,
+    /// Toggle the active split between text and a hex dump of the same bytes.
+    ToggleHexView,
     SetPageWidth,
     InspectThemeAtCursor,
     SelectTheme,
@@ -1121,6 +1123,7 @@ impl Action {
             "toggle_occurrence_highlight" => ToggleOccurrenceHighlight,
             "toggle_read_only" => ToggleReadOnly,
             "toggle_page_view" => TogglePageView,
+            "toggle_hex_view" => ToggleHexView,
             "set_page_width" => SetPageWidth,
 
             "next_buffer" => NextBuffer,
@@ -2833,6 +2836,7 @@ impl KeybindingResolver {
             Action::ToggleOccurrenceHighlight => t!("action.toggle_occurrence_highlight"),
             Action::ToggleReadOnly => t!("action.toggle_read_only"),
             Action::TogglePageView => t!("action.toggle_page_view"),
+            Action::ToggleHexView => t!("action.toggle_hex_view"),
             Action::SetPageWidth => t!("action.set_page_width"),
             Action::NextBuffer => t!("action.next_buffer"),
             Action::PrevBuffer => t!("action.prev_buffer"),
